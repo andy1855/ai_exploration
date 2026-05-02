@@ -40,7 +40,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pix2text import Pix2Text
 
 # ---- 集成 Doc-Image-Tool ----
-_DOC_TOOL_DIR = Path(__file__).parent.parent / 'Doc-Image-Tool' / 'function_method'
+_DOC_TOOL_DIR = Path(__file__).parent.parent / 'third-party-libs' / 'Doc-Image-Tool' / 'function_method'
 if str(_DOC_TOOL_DIR) not in sys.path:
     sys.path.insert(0, str(_DOC_TOOL_DIR))
 
