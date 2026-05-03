@@ -1,0 +1,42 @@
+{
+  "version": "0.1.0",
+  "theme": "system",
+  "locale": "zh-CN",
+  "features": {
+    "subtasks": true,
+    "dueReminders": true,
+    "dragReorder": false,
+    "archiveCompleted": false,
+    "showSidebar": true
+  },
+  "defaults": {
+    "newTaskPriority": "medium",
+    "dueDateOffsetDays": 0,
+    "defaultListId": "inbox"
+  },
+  "reminders": {
+    "enabled": true,
+    "minutesBeforeDue": [1440, 60],
+    "quietHours": {
+      "enabled": false,
+      "start": "22:00",
+      "end": "08:00"
+    }
+  },
+  "storage": {
+    "localKeyPrefix": "todolist:v1:",
+    "syncEndpoint": null
+  },
+  "ui": {
+    "sidebarExpanded": true,
+    "sidebarWidthPx": 240,
+    "pageSize": 50,
+    "maxVisibleTags": 3,
+    "animationDurationMs": 180,
+    "density": "comfortable"
+  },
+  "sort": {
+    "primary": "dueDate",
+    "direction": "asc"
+  }
+}

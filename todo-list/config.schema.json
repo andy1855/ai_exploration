@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/todo-list/config.schema.json",
+  "title": "TodoListAppConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "配置结构版本，便于迁移",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "default": "0.1.0"
+    },
+    "theme": {
+      "type": "string",
+      "enum": ["light", "dark", "system"],
+      "description": "界面主题；system 跟随 OS"
+    },
+    "locale": {
+      "type": "string",
+      "enum": ["zh-CN", "en-US"],
+      "description": "界面语言与日期格式"
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subtasks": {
+          "type": "boolean",
+          "description": "是否启用子任务"
+        },
+        "dueReminders": {
+          "type": "boolean",
+          "description": "是否在截止前提醒（需浏览器通知权限）"
+        },
+        "dragReorder": {
+          "type": "boolean",
+          "description": "是否允许拖拽排序"
+        },
+        "archiveCompleted": {
+          "type": "boolean",
+          "description": "完成后是否自动移入归档视图"
+        },
+        "showSidebar": {
+          "type": "boolean",
+          "description": "是否显示侧栏（小屏可强制折叠）"
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "newTaskPriority": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "新建任务默认优先级"
+        },
+        "dueDateOffsetDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365,
+          "description": "快捷「明天」「一周后」等基准以外的默认截止偏移（天）；0 表示不自动填截止日期"
+        },
+        "defaultListId": {
+          "type": "string",
+          "description": "新建任务默认归属列表，如 inbox、today"
+        }
+      }
+    },
+    "reminders": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minutesBeforeDue": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "截止前多少分钟提醒，可多档，如 [1440, 60] 表示提前一天与提前一小时"
+        },
+        "quietHours": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "start": { "type": "string", "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$", "description": "24h 制开始，如 22:30" },
+            "end": { "type": "string", "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$" }
+          }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "localKeyPrefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "localStorage key 前缀，避免同域应用冲突"
+        },
+        "syncEndpoint": {
+          "type": ["string", "null"],
+          "format": "uri",
+          "description": "可选远端同步 API；null 表示仅本地"
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sidebarExpanded": {
+          "type": "boolean",
+          "description": "桌面端侧栏是否展开"
+        },
+        "sidebarWidthPx": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 320
+        },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 100,
+          "description": "分页或虚拟列表每批条数"
+        },
+        "maxVisibleTags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "列表行上最多展示标签数，超出显示 +N"
+        },
+        "animationDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "density": {
+          "type": "string",
+          "enum": ["comfortable", "compact"],
+          "description": "行高与间距：compact 适合高密度列表"
+        }
+      }
+    },
+    "sort": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "type": "string",
+          "enum": ["dueDate", "priority", "createdAt", "manual"],
+          "description": "主排序字段；manual 依赖拖拽顺序"
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["asc", "desc"]
+        }
+      }
+    }
+  }
+}

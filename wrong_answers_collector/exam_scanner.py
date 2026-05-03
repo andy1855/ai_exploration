@@ -28,6 +28,10 @@ if sys.stderr.encoding != 'utf-8':
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import argparse
+import importlib.util
+import shutil
+import subprocess
+import tempfile
 import re
 import unicodedata
 from pathlib import Path
@@ -98,6 +102,25 @@ WRONG_MARKER_RE = re.compile(
 # 图片级笔迹擦除（集成 Doc-Image-Tool）
 # ============================================================
 
+def _reference_image_stem(path: Path) -> str:
+    """文件名主名 NFC 规范化，避免因全角括号等导致误判。"""
+    return unicodedata.normalize('NFKC', path.stem).strip()
+
+
+def _is_reference_only_image(path: Path) -> bool:
+    """仅对照、不参与 `--erase` 批处理的参考图（与 raw 并排放时的效果图）。"""
+    stem = _reference_image_stem(path).casefold()
+    if '效果图' in stem or '效果圖' in stem:
+        return True
+    if stem == '效果图' or stem == '效果圖':
+        return True
+    if stem.startswith(('效果图-', '效果图_', '效果图 ')):
+        return True
+    if stem.startswith(('效果圖-', '效果圖_')):
+        return True
+    return False
+
+
 class _DenoiseOptions:
     """
     模拟 argparse.Namespace，供 docscan_main 使用。
@@ -123,23 +146,25 @@ class _DenoiseOptions:
 def remove_handwriting_from_image(
     image_path: Path,
     output_path: Path,
-    stroke_width_threshold: float = 2.5,
-    solidity_threshold: float = 0.6,
+    erase_backend: str = 'doc-image-tool',
+    model_repo: Path | None = None,
+    model_checkpoint: Path | None = None,
+    model_command: str | None = None,
+    model_device: str = 'cpu',
+    mask_threshold: float = 0.5,
 ) -> Path:
     """
-    从试卷图片中擦除手写笔迹，保留印刷文字。
-    
-    处理管线：
-    1. 先用 Doc-Image-Tool 的 Sauvola 阈值做文档漂白
-    2. 再用 Doc-Image-Tool 的笔记去噪美化（K-Means 颜色量化）
-    3. 最后用连通域分析 + 图像修复做精细擦除
-    
+    从 raw 拍屏图尽量接近扫描版效果图：去掉红批改、白化纸张、擦掉填空与草稿。
+
+    1. HSV：仅高饱和鲜红色 → 白填（小膨胀）
+    2. 亮度归一 + 拉伸；禁用锐化（避免白条变灰边）
+    3. 左栏分列擦填空 + 稀疏行擦除 + 解答区上扩白填
+    4. 左栏墨迹掩膜外交白、墨迹内压暗（消除灰雾与笔迹残影）
+
     Args:
         image_path: 输入图片路径
         output_path: 输出图片路径
-        stroke_width_threshold: 预留
-        solidity_threshold: 预留
-    
+
     Returns:
         输出图片路径
     """
@@ -147,122 +172,819 @@ def remove_handwriting_from_image(
     if img is None:
         raise FileNotFoundError(f"无法读取图片: {image_path}")
 
-    orig = img.copy()
-    print(f"  原始尺寸: {orig.shape[1]}x{orig.shape[0]}")
+    h, w = img.shape[:2]
+    print(f"  原始尺寸: {w}x{h}")
 
-    # ========== 阶段 1：文档漂白（Sauvola 自适应阈值）==========
-    print("  阶段 1/3: 文档漂白（Sauvola）...")
+    if erase_backend != 'opencv':
+        print(f"  模型擦除后端: {erase_backend}")
+        try:
+            result = remove_handwriting_with_model_backend(
+                image_path=image_path,
+                img=img,
+                backend=erase_backend,
+                model_repo=model_repo,
+                model_checkpoint=model_checkpoint,
+                model_command=model_command,
+                model_device=model_device,
+                mask_threshold=mask_threshold,
+            )
+        except Exception as e:
+            print(f"  模型后端失败: {e}")
+            if erase_backend != 'doc-image-tool':
+                try:
+                    print("  回退到 Doc-Image-Tool 管线。")
+                    result = _run_doc_image_tool_pipeline(img)
+                except Exception as fallback_e:
+                    print(f"  Doc-Image-Tool 回退失败: {fallback_e}")
+                else:
+                    _write_output_image(output_path, result)
+                    return output_path
+            print("  回退到 OpenCV 规则管线。")
+        else:
+            _write_output_image(output_path, result)
+            return output_path
+
+    # ========== 阶段 1：彩色墨水擦除（HSV 颜色检测 + inpaint）==========
+    print("  阶段 1/4: 擦除彩色笔迹（红色批改圈、标注等）...")
     try:
-        binary_bleach = sauvola_threshold(img, window_size=15, k=0.2, r=128)
-        bleached = np.full_like(img, 255)
-        text_mask = (binary_bleach == 0)
-        bleached[text_mask] = orig[text_mask]
+        stage1 = _erase_colored_ink(img)
     except Exception as e:
-        print(f"  漂白失败: {e}，跳过此阶段")
-        bleached = orig
+        print(f"  彩色笔迹擦除失败: {e}，跳过此阶段")
+        stage1 = img.copy()
 
-    # ========== 阶段 2：笔记去噪美化（K-Means 颜色量化）==========
-    print("  阶段 2/3: 笔记去噪美化（K-Means 颜色量化）...")
+    # ========== 阶段 2：背景归一化（让背景变纯白，增强印刷文字对比度）==========
+    print("  阶段 2/4: 背景归一化（去除光照不均、纸张发黄）...")
     try:
-        opts = _DenoiseOptions(
-            num_colors=6, white_bg=True, saturate=True, quiet=True,
-            sample_fraction=0.05, value_threshold=0.25, sat_threshold=0.20,
-        )
-        denoised = docscan_main(bleached, opts)
+        stage2 = _normalize_document_background(stage1)
     except Exception as e:
-        print(f"  去噪美化失败: {e}，跳过此阶段")
-        denoised = bleached
+        print(f"  背景归一化失败: {e}，跳过此阶段")
+        stage2 = stage1
 
-    # ========== 阶段 3：精细擦除 ==========
-    print("  阶段 3/3: 精细擦除...")
+    # ========== 阶段 3：稀疏行黑色笔迹精细擦除 ==========
+    print("  阶段 3/4: 稀疏区域黑色笔迹精细擦除...")
     try:
-        # 在漂白后的原图上分析，产生掩膜
-        erase_mask = _build_erase_mask(bleached)
-        # 用白色填充（非 inpainting），避免污染印刷文字
-        result = _white_fill_erase(denoised, erase_mask)
+        result = _erase_sparse_row_handwriting(stage2)
     except Exception as e:
         print(f"  精细擦除失败: {e}，使用阶段 2 结果")
-        result = denoised
+        result = stage2
 
-    cv2.imwrite(str(output_path), result)
+    # ========== 阶段 4：左栏二值式整理（墨迹压暗、非墨迹强制纯白）==========
+    print("  阶段 4/4: 左栏二值整理（去掉灰雾与不干净笔迹残影）...")
+    try:
+        result = _finalize_left_strip_scan(result)
+    except Exception as e:
+        print(f"  左栏整理失败: {e}")
+
+    _write_output_image(output_path, result)
     return output_path
 
 
-def _build_erase_mask(bleached: np.ndarray) -> np.ndarray:
-    """
-    形态学开运算笔迹擦除掩膜。
-    
-    核心原理：形态学开运算自动区分粗细笔画。
-    - 开运算(Opening) = 先腐蚀再膨胀 → 消除细笔画，保留粗笔画
-    - binary - opened = 被消除的细笔画 = 手写笔迹候选
-    
-    然后保护印刷文字密集区：开运算后仍密集的区域 = 题干。
-    """
-    gray = cv2.cvtColor(bleached, cv2.COLOR_BGR2GRAY)
-    gray = cv2.medianBlur(gray, 3)
-    h, w = gray.shape
+def _write_output_image(output_path: Path, result: np.ndarray) -> None:
+    """保存输出图，JPEG 用高质量以减少灰块/蚊噪。"""
+    ext = output_path.suffix.lower()
+    if ext in ('.jpg', '.jpeg'):
+        cv2.imwrite(str(output_path), result, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
+    else:
+        cv2.imwrite(str(output_path), result)
 
-    binary = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV, blockSize=31, C=10
+
+def remove_handwriting_with_model_backend(
+    *,
+    image_path: Path,
+    img: np.ndarray,
+    backend: str,
+    model_repo: Path | None,
+    model_checkpoint: Path | None,
+    model_command: str | None,
+    model_device: str,
+    mask_threshold: float,
+) -> np.ndarray:
+    """
+    模型后端统一入口。
+
+    支持三种接入方式：
+    1. `doc-image-tool`：使用已接入的 Sauvola + K-Means 文档清理模型/工具链；
+    2. `--model-command`：最稳妥，适配 DeepLabV3+/DIS/EraseNet 各仓库自己的预测脚本；
+       命令模板中可用 `{input}` `{staged_input}` `{output}` `{input_dir}` `{output_dir}`
+       `{repo}` `{checkpoint}` `{device}`。
+    3. `--model-checkpoint`：当权重是 TorchScript 或 `torch.save(model)` 的完整模型时，
+       直接前向预测手写 mask，再做白填。
+
+    不直接假设第三方仓库内部类名，因为这三套实现的工程结构、权重格式都不同。
+    """
+    backend = backend.lower().replace('_', '-')
+    if backend not in {'doc-image-tool', 'deeplabv3plus', 'dis', 'erasenet', 'torchscript'}:
+        raise ValueError(f"未知模型后端: {backend}")
+
+    if backend == 'doc-image-tool':
+        return _run_doc_image_tool_pipeline(img)
+
+    if (
+        backend == 'deeplabv3plus'
+        and model_repo
+        and model_checkpoint
+        and _should_use_deeplab_repo_adapter(model_repo, model_command)
+    ):
+        return _run_deeplabv3plus_repo_model(
+            image_path=image_path,
+            model_repo=model_repo,
+            model_checkpoint=model_checkpoint,
+            model_device=model_device,
+        )
+
+    if model_command:
+        return _run_external_model_command(
+            image_path=image_path,
+            img_shape=img.shape,
+            backend=backend,
+            model_repo=model_repo,
+            model_checkpoint=model_checkpoint,
+            model_command=model_command,
+            model_device=model_device,
+        )
+
+    if model_checkpoint:
+        return _run_torch_mask_model(
+            img=img,
+            checkpoint=model_checkpoint,
+            device=model_device,
+            mask_threshold=mask_threshold,
+        )
+
+    raise RuntimeError(
+        f"{backend} 后端需要提供 --model-command 或 --model-checkpoint。"
+        "这三个开源项目的权重/入口不统一，建议先用仓库自带预测脚本拼成命令模板。"
     )
 
-    # ---- 形态学开运算：消除细笔画 ----
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-    opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k, iterations=1)
 
-    # ---- 细笔画 = 原图 - 开运算 ----
-    thin = cv2.subtract(binary, opened)
-
-    # ---- 保护印刷文字密集区 ----
-    # 开运算后仍保留的像素 → 粗笔画（印刷文字）
-    # 对开运算结果做膨胀 → 找出印刷文字的"地盘"
-    k_big = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    print_zone = cv2.dilate(opened, k_big, iterations=1)
-    # 印刷区内不擦除
-    thin = cv2.bitwise_and(thin, cv2.bitwise_not(print_zone))
-
-    # ---- 保护大块区域（示意图）----
-    nl, lb, sts, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    for i in range(1, nl):
-        if sts[i, cv2.CC_STAT_AREA] > 600:
-            thin[lb == i] = 0
-
-    # ---- 形态学后处理 ----
-    thin = cv2.morphologyEx(thin, cv2.MORPH_CLOSE, k, iterations=1)
-    thin = cv2.morphologyEx(thin, cv2.MORPH_OPEN, k, iterations=1)
-    thin = cv2.dilate(thin, k, iterations=1)
-
-    thin_px = np.count_nonzero(thin)
-    print(f"    开运算掩膜: {thin_px} px ({thin_px / (h * w) * 100:.1f}%)")
-    return thin
+def _should_use_deeplab_repo_adapter(model_repo: Path, model_command: str | None) -> bool:
+    """HandWritingEraser-Pytorch 没有 infer.py 时，走仓库自带 predict_one.py。"""
+    repo = Path(model_repo).expanduser().resolve()
+    if not (repo / 'predict_one.py').exists():
+        return False
+    if not model_command:
+        return True
+    return 'infer.py' in model_command and not (repo / 'infer.py').exists()
 
 
-def _white_fill_erase(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def _run_deeplabv3plus_repo_model(
+    *,
+    image_path: Path,
+    model_repo: Path,
+    model_checkpoint: Path,
+    model_device: str,
+) -> np.ndarray:
+    """适配 AndSonder/HandWritingEraser-Pytorch 的 predict_one.py 单图推理。"""
+    repo = Path(model_repo).expanduser().resolve()
+    checkpoint = Path(model_checkpoint).expanduser().resolve()
+    predict_one = repo / 'predict_one.py'
+    if not predict_one.exists():
+        raise FileNotFoundError(f"Deeplab 仓库缺少 predict_one.py: {predict_one}")
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"模型权重不存在: {checkpoint}")
+
+    try:
+        import torch
+        import torch.nn as nn
+        from torchvision import transforms as T
+    except ImportError as e:
+        raise RuntimeError("DeeplabV3+ 后端需要安装 torch 和 torchvision") from e
+
+    device_text = str(model_device)
+    if device_text == 'auto':
+        dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    elif device_text.isdigit():
+        os.environ['CUDA_VISIBLE_DEVICES'] = device_text
+        dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        dev = torch.device(device_text)
+
+    print(f"  HandWritingEraser-Pytorch 无 infer.py，改用 predict_one.py 原生推理: {dev}")
+    sys.path.insert(0, str(repo))
+    old_cwd = os.getcwd()
+    try:
+        spec = importlib.util.spec_from_file_location('_hwe_predict_one', predict_one)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"无法加载 Deeplab 推理脚本: {predict_one}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        transform = T.Compose([
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        model = module.network.modeling.deeplabv3plus_resnet101(num_classes=3, output_stride=16)
+        loaded = torch.load(str(checkpoint), map_location=torch.device('cpu'))
+        state = loaded.get('model_state', loaded) if isinstance(loaded, dict) else loaded
+        model.load_state_dict(state)
+        model = nn.DataParallel(model)
+        model.to(dev)
+        model.eval()
+
+        opts = argparse.Namespace(device=dev, transform=transform)
+        with tempfile.TemporaryDirectory(prefix='deeplabv3plus_predict_') as tmp:
+            os.chdir(tmp)
+            rgb = module.erase_hand_write(str(Path(image_path).expanduser().resolve()), model, opts)
+    finally:
+        os.chdir(old_cwd)
+        try:
+            sys.path.remove(str(repo))
+        except ValueError:
+            pass
+
+    if rgb is None:
+        raise RuntimeError("DeeplabV3+ 推理未返回图片")
+    return cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
+
+
+def _run_doc_image_tool_pipeline(img: np.ndarray) -> np.ndarray:
+    """使用 Doc-Image-Tool 的文档漂白和笔记去噪，再执行本地精细擦除。"""
+    print("  阶段 1/6: 擦除彩色笔迹（红色批改圈、标注等）...")
+    stage1 = _erase_colored_ink(img)
+    question_strip_source = _normalize_document_background(stage1)
+
+    print("  阶段 2/6: Doc-Image-Tool Sauvola 文档漂白...")
+    binary_bleach = sauvola_threshold(stage1, window_size=15, k=0.2, r=128)
+    stage2 = np.full_like(stage1, 255)
+    text_mask = binary_bleach == 0
+    stage2[text_mask] = stage1[text_mask]
+
+    print("  阶段 3/6: Doc-Image-Tool K-Means 笔记去噪美化...")
+    opts = _DenoiseOptions(
+        num_colors=6,
+        white_bg=True,
+        saturate=True,
+        quiet=True,
+        sample_fraction=0.05,
+        value_threshold=0.25,
+        sat_threshold=0.20,
+    )
+    stage3 = docscan_main(stage2, opts)
+
+    print("  阶段 4/6: 填空横线附近答案擦除...")
+    stage4 = _erase_answers_around_blank_lines(stage3)
+
+    print("  阶段 5/6: 保守擦除行尾填空与底部草稿...")
+    result = _erase_sparse_row_handwriting(stage4, erase_sparse_rows=False)
+
+    print("  阶段 6/6: 保守增强印刷文字并清理照片边缘...")
+    result = _boost_print_contrast(result)
+    result = _restore_question_number_strip(result, question_strip_source)
+    return _clean_outer_photo_edges(result)
+
+
+def _run_external_model_command(
+    *,
+    image_path: Path,
+    img_shape: tuple[int, ...],
+    backend: str,
+    model_repo: Path | None,
+    model_checkpoint: Path | None,
+    model_command: str,
+    model_device: str,
+) -> np.ndarray:
     """
-    用白色填充擦除区域（替代 inpainting）。
-    
-    比 inpainting 更安全：不会把周围像素"涂抹"到文字区域造成污染。
-    然后对擦除边缘做轻微模糊，过渡更自然。
+    调用第三方仓库自带预测脚本。
+
+    例：
+      --erase-backend deeplabv3plus \
+      --model-repo third-party-libs/HandWritingEraser-Pytorch \
+      --model-checkpoint checkpoints/best.pth \
+      --model-command 'python {repo}/infer.py --input {input} --output {output} --ckpt {checkpoint}'
+
+    对只支持批量目录输入的仓库，可用 `{input_dir}` 和 `{output_dir}`。
     """
-    if mask.max() == 0:
-        return img
-    
+    repo = Path(model_repo).expanduser().resolve() if model_repo else None
+    checkpoint = Path(model_checkpoint).expanduser().resolve() if model_checkpoint else None
+    source_image = Path(image_path).expanduser().resolve()
+
+    with tempfile.TemporaryDirectory(prefix=f'{backend}_erase_') as tmp:
+        tmp_dir = Path(tmp)
+        output_path = tmp_dir / 'model_output.png'
+        input_dir = tmp_dir / 'input'
+        output_dir = tmp_dir / 'output'
+        input_dir.mkdir()
+        output_dir.mkdir()
+        staged_input = input_dir / source_image.name
+        shutil.copy2(source_image, staged_input)
+        fmt = {
+            'input': str(source_image),
+            'staged_input': str(staged_input),
+            'output': str(output_path),
+            'input_dir': str(input_dir),
+            'output_dir': str(output_dir),
+            'repo': str(repo) if repo else '',
+            'checkpoint': str(checkpoint) if checkpoint else '',
+            'device': model_device,
+        }
+        command = model_command.format(**fmt)
+        print(f"  调用模型命令: {command}")
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(repo) if repo else None,
+            text=True,
+            capture_output=True,
+        )
+        if proc.stdout.strip():
+            print(proc.stdout.strip())
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or f"模型命令退出码 {proc.returncode}")
+        if not output_path.exists():
+            candidates = sorted([
+                p for p in output_dir.iterdir()
+                if p.suffix.lower() in {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.tiff'}
+            ])
+            if candidates:
+                output_path = candidates[0]
+            else:
+                raise RuntimeError(
+                    f"模型命令未生成输出文件: {output_path}，输出目录也为空: {output_dir}"
+                )
+
+        out = cv2.imread(str(output_path), cv2.IMREAD_UNCHANGED)
+        if out is None:
+            raise RuntimeError(f"无法读取模型输出: {output_path}")
+
+        if out.ndim == 2:
+            # 若脚本输出的是 mask，则用白填方式擦除。
+            original = cv2.imread(str(image_path))
+            return _apply_handwriting_mask(original, out)
+
+        if out.shape[:2] != img_shape[:2]:
+            out = cv2.resize(out, (img_shape[1], img_shape[0]), interpolation=cv2.INTER_AREA)
+        if out.shape[2] == 4:
+            out = cv2.cvtColor(out, cv2.COLOR_BGRA2BGR)
+        return out
+
+
+def _run_torch_mask_model(
+    *,
+    img: np.ndarray,
+    checkpoint: Path,
+    device: str,
+    mask_threshold: float,
+) -> np.ndarray:
+    """
+    直接运行 TorchScript / 完整 PyTorch 模型，约定输出为手写区域 mask。
+
+    适合把 DeepLabV3+、DIS、EraseNet 导出成 TorchScript 后接入。
+    普通 state_dict 需要原仓库模型类定义，此函数不会猜测架构。
+    """
+    try:
+        import torch
+    except ImportError as e:
+        raise RuntimeError("模型后端需要安装 torch") from e
+
+    checkpoint = Path(checkpoint)
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"模型权重不存在: {checkpoint}")
+
+    dev = torch.device(device if device != 'auto' else ('cuda' if torch.cuda.is_available() else 'cpu'))
+
+    try:
+        model = torch.jit.load(str(checkpoint), map_location=dev)
+    except Exception:
+        loaded = torch.load(str(checkpoint), map_location=dev)
+        if isinstance(loaded, torch.nn.Module):
+            model = loaded
+        else:
+            raise RuntimeError(
+                "该 checkpoint 看起来是 state_dict，无法脱离原仓库模型类直接推理。"
+                "请改用 --model-command 调原仓库预测脚本，或导出 TorchScript。"
+            )
+
+    model.eval()
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    tensor = torch.from_numpy(rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+    tensor = tensor.to(dev)
+
+    with torch.no_grad():
+        pred = model(tensor)
+        if isinstance(pred, (list, tuple)):
+            pred = pred[0]
+        if isinstance(pred, dict):
+            pred = next(iter(pred.values()))
+        if pred.ndim == 4:
+            pred = pred[:, :1, :, :]
+        pred = torch.sigmoid(pred).squeeze().detach().cpu().numpy()
+
+    pred = cv2.resize(pred.astype(np.float32), (img.shape[1], img.shape[0]))
+    mask = (pred >= mask_threshold).astype(np.uint8) * 255
+    return _apply_handwriting_mask(img, mask)
+
+
+def _apply_handwriting_mask(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """模型输出 handwriting mask 后的统一擦除策略。"""
+    if mask.ndim == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
+    mask = cv2.dilate(mask, k, iterations=1)
+
+    # 文档去手写通常白填比自然图 inpaint 更干净；之后再做一次背景归一化。
     result = img.copy()
-    
-    # 白色填充
-    white = np.full_like(img, 255)
-    result[mask > 0] = white[mask > 0]
-    
-    # 对擦除区域边缘做轻微高斯模糊，让过渡更自然
-    edge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask_edges = cv2.dilate(mask, edge_kernel, iterations=1)
-    mask_edges = cv2.subtract(mask_edges, mask)
-    
-    if mask_edges.max() > 0:
-        blurred = cv2.GaussianBlur(result, (5, 5), 0)
-        result[mask_edges > 0] = blurred[mask_edges > 0]
-    
+    result[mask > 0] = [255, 255, 255]
+    return _normalize_document_background(result)
+
+
+def _erase_colored_ink(img: np.ndarray) -> np.ndarray:
+    """
+    用 HSV 颜色空间检测并白填擦除手写彩色墨水（教师批改红笔）。
+
+    只针对「高饱和度鲜红色」（HSV H:0-7° / 168-180°, S≥100, V≥70）：
+    - 捕获：教师用红笔圈出的错题圆圈、叉号、旁注「错」字
+    - 跳过：试卷印刷设计中的珊瑚橙色题号圆圈（S 较低 / 色相偏橙）
+
+    用白色直接填充（不用 inpaint），避免颜色重建产生灰色污点。
+
+    Returns:
+        擦除彩色笔迹后的图像
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # 只检测高饱和度鲜红（教师红笔），不检测橙色（试卷印刷圆圈）
+    # OpenCV HSV: H 0-179, S 0-255, V 0-255
+    red_lo1 = np.array([0,   100, 70], dtype=np.uint8)
+    red_hi1 = np.array([7,   255, 255], dtype=np.uint8)
+    red_lo2 = np.array([168, 100, 70], dtype=np.uint8)
+    red_hi2 = np.array([180, 255, 255], dtype=np.uint8)
+    colored_mask = cv2.bitwise_or(
+        cv2.inRange(hsv, red_lo1, red_hi1),
+        cv2.inRange(hsv, red_lo2, red_hi2),
+    )
+
+    px = int(np.count_nonzero(colored_mask))
+    total = img.shape[0] * img.shape[1]
+    print(f"    检测到红色笔迹: {px} px ({px / total * 100:.2f}%)")
+
+    if px < 50:
+        return img.copy()
+
+    # 小核少量膨胀：只盖住红笔画本身，避免膨胀进左侧印刷橙色题号圆
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    colored_mask = cv2.dilate(colored_mask, k, iterations=1)
+
+    # 白色直接填充（不用 inpaint）：避免灰色重建污点
+    result = img.copy()
+    result[colored_mask > 0] = [255, 255, 255]
+    return result
+
+
+def _normalize_document_background(img: np.ndarray) -> np.ndarray:
+    """
+    背景归一化：让纸张趋近纯白、印刷墨迹趋近黑色。
+
+    重要：不得在「已经把背景设为 255」之后再做全局锐化 —— Laplacian/叠加会把
+    白色边缘拉回 180~240 的灰值，整页出现「灰色污染」（用户反馈的主要问题）。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    bg_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (61, 61))
+    background = cv2.dilate(gray, bg_kernel)
+    background = np.where(background == 0, 1, background).astype(np.float32)
+
+    norm = gray.astype(np.float32) / background * 255.0
+    norm = np.clip(norm, 0, 255).astype(np.uint8)
+
+    # 背景硬白化（略放宽，压住照片阴影）
+    norm[norm > 210] = 255
+
+    result_gray = _squeeze_gray_to_bnw(norm)
+
+    return cv2.cvtColor(result_gray, cv2.COLOR_GRAY2BGR)
+
+
+def _finalize_left_strip_scan(
+    img: np.ndarray,
+    *,
+    band_frac: float = 0.72,
+) -> np.ndarray:
+    """
+    左栏题干带：除「疑似印刷墨迹」外一律 #FFF，避免 γ/半调产生灰块与笔迹残影。
+
+    墨迹 = 自适应二值 ∪ (灰度 < 低阈) 做小开运算去椒盐；墨迹像素压到近黑，其余白。
+    右栏 (>band_frac) 原样保留。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    cut = max(24, min(w - 24, int(round(w * band_frac))))
+    lc = gray[:, :cut].copy()
+    right = gray[:, cut:]
+
+    blk = 33
+    atk = cv2.adaptiveThreshold(
+        lc,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        blk,
+        11,
+    )
+    ink = (atk > 0) | (lc < 148)
+    ink_u8 = (ink.astype(np.uint8) * 255)
+    k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    ink_u8 = cv2.morphologyEx(ink_u8, cv2.MORPH_OPEN, k2)
+    ink = ink_u8 > 0
+
+    new_left = np.full_like(lc, 255, dtype=np.uint8)
+    v = lc.astype(np.int32)
+    new_left[ink] = np.clip((v[ink] - 25) * 18 // 25, 0, 95).astype(np.uint8)
+
+    full = np.hstack([new_left, right])
+    return cv2.cvtColor(full, cv2.COLOR_GRAY2BGR)
+
+
+def _erase_answers_around_blank_lines(
+    img: np.ndarray,
+    *,
+    band_frac: float = 0.74,
+) -> np.ndarray:
+    """
+    对填空横线附近做局部擦除：保留长横线，擦掉横线上下的短手写笔画。
+
+    模型/漂白后，填空答案通常仍以短促黑色连通域压在下划线上；
+    这里先用横向形态学找出答题线，再只在答题线的窄带内白填非横线墨迹。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    cut = max(24, min(w - 1, int(round(w * band_frac))))
+    left = gray[:, :cut]
+
+    _, dark = cv2.threshold(left, 178, 255, cv2.THRESH_BINARY_INV)
+    line_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 1))
+    hlines = cv2.morphologyEx(dark, cv2.MORPH_OPEN, line_kernel, iterations=1)
+
+    # 过滤掉短噪声，只保留真实填空线/题中横线。
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(hlines, connectivity=8)
+    keep_lines = np.zeros_like(hlines)
+    for i in range(1, num):
+        x, y, ww, hh, area = stats[i]
+        if ww >= 28 and hh <= 6 and area >= 20:
+            keep_lines[labels == i] = 255
+
+    if np.count_nonzero(keep_lines) == 0:
+        print("    步骤A0 未检测到可处理填空线")
+        return img
+
+    band_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (19, 21))
+    line_band = cv2.dilate(keep_lines, band_kernel, iterations=1)
+    protected_line = cv2.dilate(
+        keep_lines,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3)),
+        iterations=1,
+    )
+
+    erase = cv2.bitwise_and(dark, line_band)
+    erase[protected_line > 0] = 0
+
+    # 只擦横线附近较小的连通域；大块/长条多半是题干、图形或横线残段。
+    num_e, labels_e, stats_e, _ = cv2.connectedComponentsWithStats(erase, connectivity=8)
+    filtered = np.zeros_like(erase)
+    for i in range(1, num_e):
+        x, y, ww, hh, area = stats_e[i]
+        if 3 <= area <= 520 and ww <= 95 and hh <= 28:
+            filtered[labels_e == i] = 255
+    erase = filtered
+    erase = cv2.dilate(
+        erase,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=1,
+    )
+
+    erased_px = int(np.count_nonzero(erase))
+    print(f"    步骤A0 填空线邻域白填像素: {erased_px} px")
+    result = img.copy()
+    erase_full = np.zeros((h, w), dtype=np.uint8)
+    erase_full[:, :cut] = erase
+    result[erase_full > 0] = [255, 255, 255]
+    return result
+
+
+def _clean_outer_photo_edges(img: np.ndarray) -> np.ndarray:
+    """清掉手机拍摄边缘的黑边/侧边噪声，避免影响与扫描效果图的观感。"""
+    result = img.copy()
+    h, w = result.shape[:2]
+    # 左侧题号很靠边，不能整条大面积白填；只清最外缘拍摄黑边。
+    edge_x = max(24, int(round(w * 0.012)))
+    edge_y = max(8, int(round(h * 0.006)))
+    result[:, :edge_x] = [255, 255, 255]
+    result[:, w - max(8, edge_x // 2):] = [255, 255, 255]
+    result[:edge_y, :] = [255, 255, 255]
+    result[h - edge_y:, :] = [255, 255, 255]
+    return result
+
+
+def _restore_question_number_strip(
+    processed: np.ndarray,
+    source: np.ndarray,
+    *,
+    strip_frac: float = 0.058,
+) -> np.ndarray:
+    """恢复左侧题号栏，避免灰色圆圈题号被模型/阈值化当成背景抹掉。"""
+    result = processed.copy()
+    h, w = result.shape[:2]
+    strip_w = max(84, min(int(round(w * strip_frac)), 118, w // 5))
+    source_resized = source
+    if source_resized.shape[:2] != result.shape[:2]:
+        source_resized = cv2.resize(source_resized, (w, h), interpolation=cv2.INTER_AREA)
+
+    result[:, :strip_w] = source_resized[:, :strip_w]
+    print(f"    题号栏保护: 恢复左侧 {strip_w}px")
+    return result
+
+
+def _boost_print_contrast(img: np.ndarray) -> np.ndarray:
+    """只做灰度拉伸，不做开运算删点，避免题干细笔画缺失。"""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    out = gray.astype(np.float32)
+    out = (out - 135.0) / (235.0 - 135.0) * 255.0
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    out[out > 232] = 255
+    return cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
+
+
+def _squeeze_gray_to_bnw(gray: np.ndarray) -> np.ndarray:
+    """
+    将「接近纸白」的中间灰.squeeze 成 255，将「墨迹」.squeeze 得更黑。
+    减少整页雾霾感，且不引入锐化灰边。
+    """
+    lo, hi = 115, 238
+    out = gray.astype(np.float32)
+    out = (out.astype(np.float32) - lo) / (hi - lo) * 255.0
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    out[out > 200] = 255
+    return out
+
+
+def _erase_sparse_row_handwriting(
+    img: np.ndarray,
+    *,
+    erase_sparse_rows: bool = True,
+) -> np.ndarray:
+    """
+    左栏填空与笔迹擦除：
+
+    - 全程仅在「题干投影宽」proj_w (~72%) 内统计密度，图示列不参与；
+    - 整行稀疏行：与印刷密行邻接保护带外，低阈二值化后白填；
+    - 「左半题干密 + 右半行尾疏」分行：同一行上题干与手写答案分列，避免保护带挡掉填空笔迹。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+
+    proj_w = max(24, min(w - 1, int(round(w * 0.72))))
+    gp = gray[:, :proj_w]
+
+    _, bin_for_rows = cv2.threshold(gp, 198, 255, cv2.THRESH_BINARY_INV)
+    row_black = bin_for_rows.sum(axis=1).astype(np.float32) / 255.0
+    row_density = row_black / proj_w
+
+    PRINT_THRESH = 0.033
+    SPARSE_LOW = 0.0015
+    SPARSE_HIGH = PRINT_THRESH
+
+    is_sparse = (row_density > SPARSE_LOW) & (row_density < SPARSE_HIGH)
+
+    is_dense = row_density >= PRINT_THRESH
+    protect = np.zeros(h, dtype=bool)
+    for y in range(h):
+        if is_dense[y]:
+            protect[max(0, y - 3):min(h, y + 4)] = True
+    is_sparse = is_sparse & ~protect
+    if not erase_sparse_rows:
+        is_sparse[:] = False
+
+    sparse_count = int(is_sparse.sum())
+    mode = "启用" if erase_sparse_rows else "禁用"
+    print(f"    步骤A 整行稀疏: {sparse_count} 行（{mode}）")
+
+    split_c = max(100, min(proj_w - 80, int(round(proj_w * 0.48))))
+    _, bl_hs = cv2.threshold(gp[:, :split_c], 198, 255, cv2.THRESH_BINARY_INV)
+    _, br_hs = cv2.threshold(gp[:, split_c:], 200, 255, cv2.THRESH_BINARY_INV)
+    rw = float(split_c)
+    rrest = float(proj_w - split_c)
+    d_left = bl_hs.sum(axis=1).astype(np.float32) / (255.0 * rw)
+    d_right = br_hs.sum(axis=1).astype(np.float32) / (255.0 * max(1.0, rrest))
+
+    row_idx = np.arange(h, dtype=np.int32)
+
+    # 行尾填空区：左侧印刷密、右侧仅少量墨迹；**不用**整条「密行保护带」封杀，
+    # 只改写右半条，题干汉字不会被波及。
+    is_partial = (
+        (row_idx > int(h * 0.05))
+        & (d_left >= 0.028)
+        & (d_right > 0.0025)
+        & (d_right < 0.055)
+    )
+    partial_n = int(is_partial.sum())
+    print(f"    步骤A 行尾填空分区: {partial_n} 行")
+
+    erase_x_end = proj_w
+
+    sparse_2d = np.zeros((h, w), dtype=np.uint8)
+    sparse_2d[is_sparse, :erase_x_end] = 255
+
+    partial_2d = np.zeros((h, w), dtype=np.uint8)
+    partial_2d[is_partial, split_c:erase_x_end] = 255
+
+    combined = cv2.bitwise_or(sparse_2d[:, :erase_x_end], partial_2d[:, :erase_x_end])
+    _, bin_erase = cv2.threshold(gray[:, :erase_x_end], 110, 255, cv2.THRESH_BINARY_INV)
+
+    erase_mask_left = cv2.bitwise_and(bin_erase, combined)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    erase_mask_left = cv2.dilate(erase_mask_left, k, iterations=1)
+
+    erased_px = int(np.count_nonzero(erase_mask_left))
+    print(f"    步骤A 白填像素（左栏）: {erased_px} px")
+
+    result = img.copy()
+    erase_full = np.zeros((h, w), dtype=np.uint8)
+    erase_full[:, :erase_x_end] = erase_mask_left
+    result[erase_full > 0] = [255, 255, 255]
+
+    _, bin_sol = cv2.threshold(gp, 203, 255, cv2.THRESH_BINARY_INV)
+    row_density_sol = bin_sol.sum(axis=1).astype(np.float32) / (255.0 * proj_w)
+
+    result = _erase_solution_block(result, row_density_sol, h, w)
+    return result
+
+
+def _erase_solution_block(
+    img: np.ndarray,
+    row_density: np.ndarray,
+    h: int,
+    w: int,
+) -> np.ndarray:
+    """
+    白填页面左栏投影识别出的「大段手写解题区」（通常位于最下方）。
+
+    旧算法假设手写行投影密度极低，与实际公式草稿（左栏仍可较密）不符。
+    现改为：在 [0.62h, h] 内找滑动窗口均值落在 (lo, hi) 内的**最长连续区间**，
+    若跨度 ≥ MIN_ROWS 行则取其中最靠下的那一段的起点作为解答区起始行。
+
+    row_density：须与 _erase_sparse_row_handwriting 一致，仅为左栏 ~72% 宽度的投影密度。
+    """
+    SEARCH_TOP = int(h * 0.62)
+    WINDOW = 30
+    HANDWRITE_LO = 0.0005
+    HANDWRITE_HI = 0.08
+    MIN_ROWS = 120
+
+    result = img.copy()
+    if h - WINDOW <= SEARCH_TOP:
+        print("    步骤B 跳过（图像过矮）")
+        return result
+
+    run_start = None
+    intervals = []
+
+    for y in range(SEARCH_TOP, h - WINDOW):
+        window_density = float(row_density[y : y + WINDOW].mean())
+        ok = HANDWRITE_LO < window_density < HANDWRITE_HI
+        if ok:
+            if run_start is None:
+                run_start = y
+        else:
+            if run_start is not None:
+                intervals.append((run_start, y - 1))
+                run_start = None
+
+    if run_start is not None:
+        intervals.append((run_start, h - WINDOW - 1))
+
+    long = [(a, b, b - a + 1) for a, b in intervals if (b - a + 1) >= MIN_ROWS]
+    if not long:
+        print("    步骤B 未检测到独立解答区块")
+        return result
+
+    a, b, ln = max(long, key=lambda t: (t[2], t[0]))
+    PAD_UP = max(108, WINDOW * 3)
+    solution_start_raw = max(0, int(a - PAD_UP))
+    solution_start = max(int(h * 0.56), solution_start_raw)
+    dense_print_rows = int(np.count_nonzero(row_density[solution_start:] > 0.035))
+    if dense_print_rows > 12:
+        safe_start = max(int(h * 0.78), solution_start)
+        bottom_density = float(row_density[safe_start:].mean()) if safe_start < h else 0.0
+        if safe_start < h - 80 and bottom_density > 0.0025:
+            print(
+                "    步骤B 检测到底部印刷题干，改为只白填更靠下草稿区: "
+                f"y≥{safe_start}（底部均值密度 {bottom_density:.4f}）"
+            )
+            result[safe_start:, :] = [255, 255, 255]
+        else:
+            print(
+                "    步骤B 跳过整块白填"
+                f"（y≥{solution_start} 仍有 {dense_print_rows} 行疑似印刷题干）"
+            )
+        return result
+
+    print(
+        f"    步骤B 解答区块: 检测窗 {a}~{b}（≈{ln} 行），上扩白填自 y≥{solution_start} 至页底"
+    )
+
+    result[solution_start:, :] = [255, 255, 255]
     return result
 
 
@@ -442,7 +1164,7 @@ def clean_ocr_text(text: str) -> str:
     
     # 7. 清理 OCR 常见噪声：连续重复标点、无意义符号序列
     text = re.sub(r'[。，、；：？！…]{4,}', '...', text)  # 过多标点合并
-    text = re.sub(r'(?<![a-zA-Z0-9])[a-zA-Z]{1,2}(?![a-zA-Z0-9])', '', text)  # 孤立的1-2个英文字母
+    # 注意：不删除孤立的 1-2 个英文字母，数学公式变量（x, y, r, n, π 等）会被破坏
     text = re.sub(r'[^\S\n]{3,}', '  ', text)  # 多个空格合并
     
     # 8. 清理 OCR 中常见的错误识别模式
@@ -672,7 +1394,9 @@ def extract_text_from_image(image_path: Path) -> str:
     """
     try:
         p2t = get_p2t()
-        result = p2t.recognize(str(image_path))
+        # resized_shape=1600：以更高分辨率处理，适合文字密集的试卷图片
+        # 默认 768 对于 A4 试卷来说太低，容易漏识别小字和公式
+        result = p2t.recognize(str(image_path), resized_shape=1600)
         raw_text = _extract_text_from_result(result)
         
         if not raw_text:
@@ -886,6 +1610,47 @@ def main():
         help='图片笔迹擦除模式：直接对图片做手写笔迹擦除，输出清洁图片（不生成Word文档）'
     )
     parser.add_argument(
+        '--erase-backend',
+        choices=['doc-image-tool', 'opencv', 'deeplabv3plus', 'dis', 'erasenet', 'torchscript'],
+        default='doc-image-tool',
+        help=(
+            '笔迹擦除后端：doc-image-tool=已接入的 Sauvola+K-Means 模型/工具管线；'
+            'opencv=规则管线；'
+            'deeplabv3plus/dis/erasenet=第三方模型预测脚本或权重；'
+            'torchscript=直接加载 TorchScript/完整 PyTorch 模型'
+        ),
+    )
+    parser.add_argument(
+        '--model-repo',
+        default=None,
+        help='第三方模型仓库路径，如 HandWritingEraser-Pytorch / Handwriting-Removal-DIS / bdpan_erase_competition',
+    )
+    parser.add_argument(
+        '--model-checkpoint',
+        default=None,
+        help='模型权重路径。TorchScript/完整模型可直接推理；普通 state_dict 建议配合 --model-command 使用',
+    )
+    parser.add_argument(
+        '--model-command',
+        default=None,
+        help=(
+            '第三方仓库预测命令模板，可用 {input} {staged_input} {output} '
+            '{input_dir} {output_dir} {repo} {checkpoint} {device}。'
+            '若输出灰度图则按 mask 白填；若输出彩色图则直接作为清洁图。'
+        ),
+    )
+    parser.add_argument(
+        '--model-device',
+        default='auto',
+        help='模型推理设备：auto/cpu/cuda 等（默认: auto）',
+    )
+    parser.add_argument(
+        '--mask-threshold',
+        type=float,
+        default=0.5,
+        help='TorchScript mask 二值化阈值（默认: 0.5）',
+    )
+    parser.add_argument(
         '--mode', choices=['all', 'wrong'], default='all',
         help='整理模式：all=整理所有题目，wrong=仅整理错题（默认: all）'
     )
@@ -911,32 +1676,61 @@ def main():
         print(f"支持的格式: {', '.join(image_extensions)}")
         sys.exit(1)
 
+    # 笔迹擦除时跳过参考图「效果图」——只用于人工对照，不产生 *_cleaned 文件
+    erase_targets = [f for f in image_files if not _is_reference_only_image(f)]
+
     # ============================================================
     # 笔迹擦除模式
     # ============================================================
     if args.erase:
+        if not erase_targets:
+            print(
+                "错误: 文件夹中只有「效果图」参考图，没有可对齐 raw 。"
+                "请放入手机拍摄的试卷照片（例如 raw.jpg）。"
+            )
+            sys.exit(1)
+
         output_dir = folder_path / "cleaned"
         output_dir.mkdir(exist_ok=True)
+        model_repo = Path(args.model_repo).expanduser().resolve() if args.model_repo else None
+        model_checkpoint = (
+            Path(args.model_checkpoint).expanduser().resolve() if args.model_checkpoint else None
+        )
 
         print(f"笔迹擦除模式")
-        print(f"找到 {len(image_files)} 张图片")
+        if len(erase_targets) < len(image_files):
+            print(
+                f"找到 {len(image_files)} 张图片，跳过参考图 "
+                f"效果图.*（剩 {len(erase_targets)} 张待处理）"
+            )
+        else:
+            print(f"找到 {len(erase_targets)} 张图片")
         print(f"输出目录: {output_dir}")
         print("-" * 50)
 
         success_count = 0
-        for idx, file_path in enumerate(image_files, 1):
+        for idx, file_path in enumerate(erase_targets, 1):
             output_path = output_dir / f"{file_path.stem}_cleaned{file_path.suffix}"
-            print(f"[{idx}/{len(image_files)}] 擦除: {file_path.name}")
+            print(f"[{idx}/{len(erase_targets)}] 擦除: {file_path.name}")
 
             try:
-                remove_handwriting_from_image(file_path, output_path)
+                remove_handwriting_from_image(
+                    file_path,
+                    output_path,
+                    erase_backend=args.erase_backend,
+                    model_repo=model_repo,
+                    model_checkpoint=model_checkpoint,
+                    model_command=args.model_command,
+                    model_device=args.model_device,
+                    mask_threshold=args.mask_threshold,
+                )
                 print(f"  → 已保存: {output_path.name}")
                 success_count += 1
             except Exception as e:
                 print(f"  ✗ 失败: {e}")
 
         print("-" * 50)
-        print(f"完成: {success_count}/{len(image_files)} 张图片已处理")
+        print(f"完成: {success_count}/{len(erase_targets)} 张图片已处理")
         return
 
     # ============================================================

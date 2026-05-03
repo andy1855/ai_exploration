@@ -1,0 +1,104 @@
+/* ===== Design Tokens — Light Theme (default) ===== */
+:root {
+  /* Color: backgrounds */
+  --color-bg-app: #f4f5f7;
+  --color-bg-surface: #ffffff;
+  --color-bg-muted: #eceef2;
+  --color-border: #e1e4ea;
+
+  /* Color: text */
+  --color-text-primary: #1b1f26;
+  --color-text-secondary: #5c6370;
+  --color-text-tertiary: #8b919a;
+
+  /* Color: accent */
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-subtle: rgba(37, 99, 235, 0.08);
+
+  /* Color: semantic */
+  --color-success: #16a34a;
+  --color-success-subtle: rgba(22, 163, 74, 0.1);
+  --color-warning: #d97706;
+  --color-warning-subtle: rgba(217, 119, 6, 0.1);
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-danger-subtle: rgba(220, 38, 38, 0.08);
+
+  /* Color: priority */
+  --color-priority-high: #b91c1c;
+  --color-priority-medium: #ca8a04;
+  --color-priority-low: #64748b;
+
+  /* Typography */
+  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 15px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(15, 18, 24, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 18, 24, 0.10);
+  --shadow-lg: 0 8px 24px rgba(15, 18, 24, 0.14);
+
+  /* Z-index */
+  --z-sticky: 100;
+  --z-overlay: 200;
+  --z-drawer: 201;
+  --z-modal: 300;
+
+  /* Layout */
+  --header-height: 56px;
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 60px;
+
+  /* Animation */
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --duration-slow: 280ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ===== Dark Theme ===== */
+[data-theme="dark"] {
+  --color-bg-app: #0f1218;
+  --color-bg-surface: #171b24;
+  --color-bg-muted: #222836;
+  --color-border: #2e3444;
+  --color-text-primary: #f1f3f7;
+  --color-text-secondary: #a8b0bd;
+  --color-text-tertiary: #6b7280;
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-subtle: rgba(59, 130, 246, 0.12);
+  --color-success-subtle: rgba(22, 163, 74, 0.15);
+  --color-warning-subtle: rgba(217, 119, 6, 0.15);
+  --color-danger-subtle: rgba(220, 38, 38, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
+}

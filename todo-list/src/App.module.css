@@ -1,0 +1,32 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  padding: var(--space-5);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  /* Sidebar auto-hides at md breakpoint */
+  .main {
+    padding: var(--space-4);
+  }
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: var(--space-3);
+  }
+}
