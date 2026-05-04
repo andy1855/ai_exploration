@@ -9,6 +9,7 @@ __pycache__/
 *.env
 *.venv
 *.egg-info/
+node_modules/
 dist/
 build/
 *.egg
