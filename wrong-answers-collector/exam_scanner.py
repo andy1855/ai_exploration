@@ -204,36 +204,11 @@ def remove_handwriting_from_image(
             _write_output_image(output_path, result)
             return output_path
 
-    # ========== 阶段 1：彩色墨水擦除（HSV 颜色检测 + inpaint）==========
-    print("  阶段 1/4: 擦除彩色笔迹（红色批改圈、标注等）...")
     try:
-        stage1 = _erase_colored_ink(img)
+        result = _run_opencv_mask_inpaint_pipeline(img)
     except Exception as e:
-        print(f"  彩色笔迹擦除失败: {e}，跳过此阶段")
-        stage1 = img.copy()
-
-    # ========== 阶段 2：背景归一化（让背景变纯白，增强印刷文字对比度）==========
-    print("  阶段 2/4: 背景归一化（去除光照不均、纸张发黄）...")
-    try:
-        stage2 = _normalize_document_background(stage1)
-    except Exception as e:
-        print(f"  背景归一化失败: {e}，跳过此阶段")
-        stage2 = stage1
-
-    # ========== 阶段 3：稀疏行黑色笔迹精细擦除 ==========
-    print("  阶段 3/4: 稀疏区域黑色笔迹精细擦除...")
-    try:
-        result = _erase_sparse_row_handwriting(stage2)
-    except Exception as e:
-        print(f"  精细擦除失败: {e}，使用阶段 2 结果")
-        result = stage2
-
-    # ========== 阶段 4：左栏二值式整理（墨迹压暗、非墨迹强制纯白）==========
-    print("  阶段 4/4: 左栏二值整理（去掉灰雾与不干净笔迹残影）...")
-    try:
-        result = _finalize_left_strip_scan(result)
-    except Exception as e:
-        print(f"  左栏整理失败: {e}")
+        print(f"  OpenCV mask+inpaint 管线失败: {e}，回退到旧规则管线。")
+        result = _run_legacy_opencv_pipeline(img)
 
     _write_output_image(output_path, result)
     return output_path
@@ -246,6 +221,69 @@ def _write_output_image(output_path: Path, result: np.ndarray) -> None:
         cv2.imwrite(str(output_path), result, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
     else:
         cv2.imwrite(str(output_path), result)
+
+
+def _run_opencv_mask_inpaint_pipeline(img: np.ndarray) -> np.ndarray:
+    """
+    OpenCV 本地擦除管线：先生成笔迹 mask，再对 mask 区域做局部修复。
+
+    这个后端模拟 ChatGPT/清理工具常见的处理方式，但只使用 OpenCV：
+    - HSV/Lab 颜色分割找红色批改；
+    - 彩色批改默认白填，避免 OpenCV inpaint 把相邻黑字扩散成黑块；
+    - 横线邻域和底部草稿区用版面规则白填，避免 OpenCV inpaint 大块区域产生黑斑。
+    """
+    print("  阶段 1/5: 生成彩色批改 mask...")
+    mask = _build_colored_ink_mask(img)
+    px = int(np.count_nonzero(mask))
+    total = img.shape[0] * img.shape[1]
+    print(f"    彩色批改 mask: {px} px ({px / total * 100:.2f}%)")
+
+    print("  阶段 2/5: 白填彩色批改区域（大模型/LaMa 可使用 {mask} 做生成式修复）...")
+    stage1 = img.copy()
+    stage1[mask > 0] = [255, 255, 255]
+
+    print("  阶段 3/5: 背景归一化（去阴影、白化纸张）...")
+    stage2 = _normalize_document_background(stage1)
+
+    print("  阶段 4/5: 二次保守擦除横线答案与稀疏草稿...")
+    stage3 = _erase_answers_around_blank_lines(stage2)
+    stage3 = _erase_sparse_row_handwriting(stage3)
+
+    print("  阶段 5/5: 保守保护题号栏并清理边缘...")
+    result = stage3
+    result = _restore_question_number_strip(result, _normalize_document_background(_erase_colored_ink(img)))
+    return _clean_outer_photo_edges(result)
+
+
+def _run_legacy_opencv_pipeline(img: np.ndarray) -> np.ndarray:
+    """旧版规则后端，作为 mask+inpaint 失败时的兜底。"""
+    print("  阶段 1/4: 擦除彩色笔迹（红色批改圈、标注等）...")
+    try:
+        stage1 = _erase_colored_ink(img)
+    except Exception as e:
+        print(f"  彩色笔迹擦除失败: {e}，跳过此阶段")
+        stage1 = img.copy()
+
+    print("  阶段 2/4: 背景归一化（去除光照不均、纸张发黄）...")
+    try:
+        stage2 = _normalize_document_background(stage1)
+    except Exception as e:
+        print(f"  背景归一化失败: {e}，跳过此阶段")
+        stage2 = stage1
+
+    print("  阶段 3/4: 稀疏区域黑色笔迹精细擦除...")
+    try:
+        result = _erase_sparse_row_handwriting(stage2)
+    except Exception as e:
+        print(f"  精细擦除失败: {e}，使用阶段 2 结果")
+        result = stage2
+
+    print("  阶段 4/4: 左栏二值整理（去掉灰雾与不干净笔迹残影）...")
+    try:
+        result = _finalize_left_strip_scan(result)
+    except Exception as e:
+        print(f"  左栏整理失败: {e}")
+    return result
 
 
 def remove_handwriting_with_model_backend(
@@ -262,22 +300,30 @@ def remove_handwriting_with_model_backend(
     """
     模型后端统一入口。
 
-    支持三种接入方式：
+    支持四种接入方式：
     1. `doc-image-tool`：使用已接入的 Sauvola + K-Means 文档清理模型/工具链；
-    2. `--model-command`：最稳妥，适配 DeepLabV3+/DIS/EraseNet 各仓库自己的预测脚本；
-       命令模板中可用 `{input}` `{staged_input}` `{output}` `{input_dir}` `{output_dir}`
+    2. `--model-command`：最稳妥，适配 DeepLabV3+/DIS/EraseNet/LaMa 各仓库自己的预测脚本；
+       命令模板中可用 `{input}` `{staged_input}` `{mask}` `{output}` `{input_dir}` `{output_dir}`
        `{repo}` `{checkpoint}` `{device}`。
-    3. `--model-checkpoint`：当权重是 TorchScript 或 `torch.save(model)` 的完整模型时，
+    3. `lama`：未提供 `--model-command` 时，自动尝试 IOPaint/lama-cleaner 的 LaMa inpainting。
+    4. `--model-checkpoint`：当权重是 TorchScript 或 `torch.save(model)` 的完整模型时，
        直接前向预测手写 mask，再做白填。
 
     不直接假设第三方仓库内部类名，因为这三套实现的工程结构、权重格式都不同。
     """
     backend = backend.lower().replace('_', '-')
-    if backend not in {'doc-image-tool', 'deeplabv3plus', 'dis', 'erasenet', 'torchscript'}:
+    if backend not in {'doc-image-tool', 'deeplabv3plus', 'dis', 'erasenet', 'lama', 'torchscript'}:
         raise ValueError(f"未知模型后端: {backend}")
 
     if backend == 'doc-image-tool':
         return _run_doc_image_tool_pipeline(img)
+
+    if backend == 'lama' and not model_command:
+        return _run_lama_inpaint_backend(
+            image_path=image_path,
+            img=img,
+            model_device=model_device,
+        )
 
     if (
         backend == 'deeplabv3plus'
@@ -433,6 +479,150 @@ def _run_doc_image_tool_pipeline(img: np.ndarray) -> np.ndarray:
     return _clean_outer_photo_edges(result)
 
 
+def _run_lama_inpaint_backend(
+    *,
+    image_path: Path,
+    img: np.ndarray,
+    model_device: str,
+) -> np.ndarray:
+    """
+    使用 LaMa 做生成式局部修复。
+
+    默认优先调用 IOPaint：
+      pip install iopaint
+      python exam_scanner.py ./imgs --erase --erase-backend lama
+
+    若本机仍在使用旧版 lama-cleaner，也会自动尝试 `lama-cleaner` 命令。
+    """
+    source_image = Path(image_path).expanduser().resolve()
+    with tempfile.TemporaryDirectory(prefix='lama_inpaint_') as tmp:
+        tmp_dir = Path(tmp)
+        mask_path = tmp_dir / 'mask.png'
+        output_path = tmp_dir / 'lama_output.png'
+        mask = _build_handwriting_erase_mask(img)
+        cv2.imwrite(str(mask_path), mask)
+
+        if importlib.util.find_spec('simple_lama_inpainting') is not None:
+            print("  使用 simple-lama-inpainting 直接执行 LaMa 修复...")
+            out = _run_simple_lama_inpainting(img, mask, model_device)
+            return _postprocess_lama_document_result(out, img)
+
+        commands = _candidate_lama_commands(
+            image_path=source_image,
+            mask_path=mask_path,
+            output_path=output_path,
+            model_device=model_device,
+        )
+        if not commands:
+            raise RuntimeError(
+                "未找到 LaMa 工具。请先安装 IOPaint: pip install iopaint，"
+                "或使用 --model-command 显式传入 LaMa 推理命令。"
+            )
+
+        errors = []
+        for command in commands:
+            print("  调用 LaMa 命令: " + " ".join(str(part) for part in command))
+            proc = subprocess.run(
+                [str(part) for part in command],
+                text=True,
+                capture_output=True,
+            )
+            if proc.stdout.strip():
+                print(proc.stdout.strip())
+            if proc.returncode == 0 and output_path.exists():
+                out = cv2.imread(str(output_path), cv2.IMREAD_UNCHANGED)
+                if out is None:
+                    errors.append(f"命令成功但无法读取输出: {output_path}")
+                    continue
+                if out.ndim == 2:
+                    out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
+                elif out.shape[2] == 4:
+                    out = cv2.cvtColor(out, cv2.COLOR_BGRA2BGR)
+                if out.shape[:2] != img.shape[:2]:
+                    out = cv2.resize(out, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_AREA)
+                return _postprocess_lama_document_result(out, img)
+
+            errors.append(proc.stderr.strip() or f"退出码 {proc.returncode}")
+
+        raise RuntimeError("LaMa 调用失败: " + " | ".join(errors))
+
+
+def _run_simple_lama_inpainting(
+    img: np.ndarray,
+    mask: np.ndarray,
+    model_device: str,
+) -> np.ndarray:
+    """直接调用 simple-lama-inpainting 包，避免依赖 IOPaint CLI。"""
+    global _simple_lama_instance
+    try:
+        import torch
+        from simple_lama_inpainting import SimpleLama
+    except ImportError as e:
+        raise RuntimeError("simple-lama-inpainting 后端需要安装 torch 和 simple-lama-inpainting") from e
+
+    if model_device == 'auto':
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+        else:
+            device = torch.device('cpu')
+    else:
+        device = torch.device(model_device)
+
+    if _simple_lama_instance is None:
+        print(f"  加载 LaMa 模型: {device}")
+        _simple_lama_instance = SimpleLama(device=device)
+
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    mask_u8 = (mask > 0).astype(np.uint8) * 255
+    result = _simple_lama_instance(PILImage.fromarray(rgb), PILImage.fromarray(mask_u8))
+    result_rgb = np.asarray(result).astype(np.uint8)
+    if result_rgb.ndim == 2:
+        return cv2.cvtColor(result_rgb, cv2.COLOR_GRAY2BGR)
+    return cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+
+
+def _candidate_lama_commands(
+    *,
+    image_path: Path,
+    mask_path: Path,
+    output_path: Path,
+    model_device: str,
+) -> list[list[str | Path]]:
+    """按当前环境返回可尝试的 LaMa CLI 命令。"""
+    device = 'cpu' if model_device == 'auto' else model_device
+    common_args = [
+        '--model=lama',
+        f'--device={device}',
+        f'--image={image_path}',
+        f'--mask={mask_path}',
+        f'--output={output_path}',
+    ]
+    commands: list[list[str | Path]] = []
+
+    if shutil.which('iopaint'):
+        commands.append(['iopaint', 'run', *common_args])
+    if importlib.util.find_spec('iopaint') is not None:
+        commands.append([sys.executable, '-m', 'iopaint', 'run', *common_args])
+
+    # lama-cleaner 是 IOPaint 的旧包名，保留兼容。
+    if shutil.which('lama-cleaner'):
+        commands.append(['lama-cleaner', *common_args])
+    if importlib.util.find_spec('lama_cleaner') is not None:
+        commands.append([sys.executable, '-m', 'lama_cleaner', *common_args])
+
+    return commands
+
+
+def _postprocess_lama_document_result(result: np.ndarray, original: np.ndarray) -> np.ndarray:
+    """LaMa 输出后做轻量文档白化，并恢复左侧题号栏，避免生成式模型改写题号。"""
+    normalized = _normalize_document_background(result)
+    question_strip_source = _normalize_document_background(_erase_colored_ink(original))
+    normalized = _restore_question_number_strip(normalized, question_strip_source)
+    return _clean_outer_photo_edges(normalized)
+
+
 def _run_external_model_command(
     *,
     image_path: Path,
@@ -450,9 +640,10 @@ def _run_external_model_command(
       --erase-backend deeplabv3plus \
       --model-repo third-party-libs/HandWritingEraser-Pytorch \
       --model-checkpoint checkpoints/best.pth \
-      --model-command 'python {repo}/infer.py --input {input} --output {output} --ckpt {checkpoint}'
+      --model-command 'python {repo}/infer.py --input {input} --mask {mask} --output {output} --ckpt {checkpoint}'
 
-    对只支持批量目录输入的仓库，可用 `{input_dir}` 和 `{output_dir}`。
+    对只支持批量目录输入的仓库，可用 `{input_dir}` 和 `{output_dir}`；
+    LaMa/扩散修复类仓库可直接使用 `{mask}` 作为修复 mask。
     """
     repo = Path(model_repo).expanduser().resolve() if model_repo else None
     checkpoint = Path(model_checkpoint).expanduser().resolve() if model_checkpoint else None
@@ -467,9 +658,15 @@ def _run_external_model_command(
         output_dir.mkdir()
         staged_input = input_dir / source_image.name
         shutil.copy2(source_image, staged_input)
+        original = cv2.imread(str(source_image))
+        if original is None:
+            raise RuntimeError(f"无法读取输入图片以生成 mask: {source_image}")
+        mask_path = tmp_dir / 'mask.png'
+        cv2.imwrite(str(mask_path), _build_handwriting_erase_mask(original))
         fmt = {
             'input': str(source_image),
             'staged_input': str(staged_input),
+            'mask': str(mask_path),
             'output': str(output_path),
             'input_dir': str(input_dir),
             'output_dir': str(output_dir),
@@ -508,13 +705,14 @@ def _run_external_model_command(
 
         if out.ndim == 2:
             # 若脚本输出的是 mask，则用白填方式擦除。
-            original = cv2.imread(str(image_path))
             return _apply_handwriting_mask(original, out)
 
         if out.shape[:2] != img_shape[:2]:
             out = cv2.resize(out, (img_shape[1], img_shape[0]), interpolation=cv2.INTER_AREA)
         if out.shape[2] == 4:
             out = cv2.cvtColor(out, cv2.COLOR_BGRA2BGR)
+        if backend == 'lama':
+            return _postprocess_lama_document_result(out, original)
         return out
 
 
@@ -590,6 +788,101 @@ def _apply_handwriting_mask(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return _normalize_document_background(result)
 
 
+def _build_handwriting_erase_mask(img: np.ndarray) -> np.ndarray:
+    """合成需要擦除的像素 mask，供 OpenCV inpaint 或外部 LaMa 类模型使用。"""
+    h, w = img.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    colored = _build_colored_ink_mask(img)
+    mask = cv2.bitwise_or(mask, colored)
+
+    normalized = _normalize_document_background(img)
+    blank_answers = _build_blank_line_answer_mask(normalized, verbose=False)
+    bottom_scratch = _build_bottom_solution_mask(normalized)
+    mask = cv2.bitwise_or(mask, blank_answers)
+    mask = cv2.bitwise_or(mask, bottom_scratch)
+
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
+    mask = cv2.dilate(mask, k, iterations=1)
+
+    px = int(np.count_nonzero(mask))
+    total = h * w
+    print(f"    合成擦除 mask: {px} px ({px / total * 100:.2f}%)")
+    return mask
+
+
+def _build_colored_ink_mask(img: np.ndarray) -> np.ndarray:
+    """
+    检测高饱和批改笔迹 mask。
+
+    以教师红笔为主，略带蓝/紫笔容错；只做像素候选，后续由版面阶段继续保护印刷内容。
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    red_lo1 = np.array([0, 100, 70], dtype=np.uint8)
+    red_hi1 = np.array([7, 255, 255], dtype=np.uint8)
+    red_lo2 = np.array([168, 100, 70], dtype=np.uint8)
+    red_hi2 = np.array([180, 255, 255], dtype=np.uint8)
+    red = cv2.bitwise_or(
+        cv2.inRange(hsv, red_lo1, red_hi1),
+        cv2.inRange(hsv, red_lo2, red_hi2),
+    )
+
+    # 少量容错：蓝紫色笔迹常见于学生改答案，但阈值收紧，避免误伤灰色/黑色印刷。
+    blue_purple = cv2.inRange(
+        hsv,
+        np.array([105, 80, 45], dtype=np.uint8),
+        np.array([155, 255, 230], dtype=np.uint8),
+    )
+
+    mask = cv2.bitwise_or(red, blue_purple)
+    mask = _filter_small_pen_components(mask)
+    return mask
+
+
+def _filter_small_pen_components(mask: np.ndarray) -> np.ndarray:
+    """过滤颜色分割噪点和大面积印刷色块，只保留更像笔画的连通域。"""
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    filtered = np.zeros_like(mask)
+    for i in range(1, num):
+        x, y, ww, hh, area = stats[i]
+        if area < 8:
+            continue
+        fill_ratio = area / float(max(1, ww * hh))
+        long_side = max(ww, hh)
+        short_side = min(ww, hh)
+        looks_like_stroke = (
+            area <= 3500
+            and long_side >= 3
+            and short_side <= 90
+            and fill_ratio <= 0.72
+        )
+        if looks_like_stroke:
+            filtered[labels == i] = 255
+    return filtered
+
+
+def _inpaint_document_mask(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """对 mask 区域做文档场景的局部修复；无 mask 时直接返回副本。"""
+    if mask.ndim == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    px = int(np.count_nonzero(mask))
+    if px < 50:
+        print("    mask 太小，跳过 inpaint")
+        return img.copy()
+
+    radius = 3 if px < img.shape[0] * img.shape[1] * 0.08 else 5
+    repaired = cv2.inpaint(img, mask, radius, cv2.INPAINT_TELEA)
+
+    # 大块底部草稿区在文档里应接近空白，inpaint 后再白填能避免纸纹被拖出脏影。
+    large_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (33, 33))
+    large_regions = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, large_kernel, iterations=2)
+    repaired[large_regions > 0] = np.maximum(repaired[large_regions > 0], 245)
+    return repaired
+
+
 def _erase_colored_ink(img: np.ndarray) -> np.ndarray:
     """
     用 HSV 颜色空间检测并白填擦除手写彩色墨水（教师批改红笔）。
@@ -603,18 +896,7 @@ def _erase_colored_ink(img: np.ndarray) -> np.ndarray:
     Returns:
         擦除彩色笔迹后的图像
     """
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-    # 只检测高饱和度鲜红（教师红笔），不检测橙色（试卷印刷圆圈）
-    # OpenCV HSV: H 0-179, S 0-255, V 0-255
-    red_lo1 = np.array([0,   100, 70], dtype=np.uint8)
-    red_hi1 = np.array([7,   255, 255], dtype=np.uint8)
-    red_lo2 = np.array([168, 100, 70], dtype=np.uint8)
-    red_hi2 = np.array([180, 255, 255], dtype=np.uint8)
-    colored_mask = cv2.bitwise_or(
-        cv2.inRange(hsv, red_lo1, red_hi1),
-        cv2.inRange(hsv, red_lo2, red_hi2),
-    )
+    colored_mask = _build_colored_ink_mask(img)
 
     px = int(np.count_nonzero(colored_mask))
     total = img.shape[0] * img.shape[1]
@@ -708,6 +990,22 @@ def _erase_answers_around_blank_lines(
     模型/漂白后，填空答案通常仍以短促黑色连通域压在下划线上；
     这里先用横向形态学找出答题线，再只在答题线的窄带内白填非横线墨迹。
     """
+    erase_full = _build_blank_line_answer_mask(img, band_frac=band_frac, verbose=True)
+    if np.count_nonzero(erase_full) == 0:
+        return img
+
+    result = img.copy()
+    result[erase_full > 0] = [255, 255, 255]
+    return result
+
+
+def _build_blank_line_answer_mask(
+    img: np.ndarray,
+    *,
+    band_frac: float = 0.74,
+    verbose: bool = True,
+) -> np.ndarray:
+    """识别填空横线附近的短手写答案，返回待擦除 mask。"""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
     cut = max(24, min(w - 1, int(round(w * band_frac))))
@@ -726,8 +1024,9 @@ def _erase_answers_around_blank_lines(
             keep_lines[labels == i] = 255
 
     if np.count_nonzero(keep_lines) == 0:
-        print("    步骤A0 未检测到可处理填空线")
-        return img
+        if verbose:
+            print("    步骤A0 未检测到可处理填空线")
+        return np.zeros((h, w), dtype=np.uint8)
 
     band_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (19, 21))
     line_band = cv2.dilate(keep_lines, band_kernel, iterations=1)
@@ -755,12 +1054,11 @@ def _erase_answers_around_blank_lines(
     )
 
     erased_px = int(np.count_nonzero(erase))
-    print(f"    步骤A0 填空线邻域白填像素: {erased_px} px")
-    result = img.copy()
+    if verbose:
+        print(f"    步骤A0 填空线邻域白填像素: {erased_px} px")
     erase_full = np.zeros((h, w), dtype=np.uint8)
     erase_full[:, :cut] = erase
-    result[erase_full > 0] = [255, 255, 255]
-    return result
+    return erase_full
 
 
 def _clean_outer_photo_edges(img: np.ndarray) -> np.ndarray:
@@ -909,6 +1207,59 @@ def _erase_sparse_row_handwriting(
 
     result = _erase_solution_block(result, row_density_sol, h, w)
     return result
+
+
+def _build_bottom_solution_mask(img: np.ndarray) -> np.ndarray:
+    """识别页面下半部的大块手写草稿区，返回整块擦除 mask。"""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    proj_w = max(24, min(w - 1, int(round(w * 0.72))))
+    gp = gray[:, :proj_w]
+    _, bin_sol = cv2.threshold(gp, 203, 255, cv2.THRESH_BINARY_INV)
+    row_density = bin_sol.sum(axis=1).astype(np.float32) / (255.0 * proj_w)
+
+    search_top = int(h * 0.62)
+    window = 30
+    handwrite_lo = 0.0005
+    handwrite_hi = 0.08
+    min_rows = 120
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    if h - window <= search_top:
+        return mask
+
+    run_start = None
+    intervals = []
+    for y in range(search_top, h - window):
+        window_density = float(row_density[y : y + window].mean())
+        ok = handwrite_lo < window_density < handwrite_hi
+        if ok:
+            if run_start is None:
+                run_start = y
+        elif run_start is not None:
+            intervals.append((run_start, y - 1))
+            run_start = None
+
+    if run_start is not None:
+        intervals.append((run_start, h - window - 1))
+
+    long = [(a, b, b - a + 1) for a, b in intervals if (b - a + 1) >= min_rows]
+    if not long:
+        return mask
+
+    a, _, _ = max(long, key=lambda t: (t[2], t[0]))
+    # 生成给 LaMa/外部修复模型的 mask 时宁可保守，避免把第 21 题题干也交给模型重绘。
+    solution_start = max(int(h * 0.76), int(a - max(108, window * 3)))
+    dense_print_rows = int(np.count_nonzero(row_density[solution_start:] > 0.035))
+    if dense_print_rows > 12:
+        safe_start = max(int(h * 0.78), solution_start)
+        bottom_density = float(row_density[safe_start:].mean()) if safe_start < h else 0.0
+        if safe_start < h - 80 and bottom_density > 0.0025:
+            mask[safe_start:, :] = 255
+        return mask
+
+    mask[solution_start:, :] = 255
+    return mask
 
 
 def _erase_solution_block(
@@ -1325,6 +1676,7 @@ def is_wrong_marker_heavy(line):
 # ============================================================
 
 _p2t_instance = None
+_simple_lama_instance = None
 
 def get_p2t():
     """
@@ -1611,12 +1963,13 @@ def main():
     )
     parser.add_argument(
         '--erase-backend',
-        choices=['doc-image-tool', 'opencv', 'deeplabv3plus', 'dis', 'erasenet', 'torchscript'],
+        choices=['doc-image-tool', 'opencv', 'deeplabv3plus', 'dis', 'erasenet', 'lama', 'torchscript'],
         default='doc-image-tool',
         help=(
             '笔迹擦除后端：doc-image-tool=已接入的 Sauvola+K-Means 模型/工具管线；'
-            'opencv=规则管线；'
+            'opencv=本地 mask+inpaint 规则管线；'
             'deeplabv3plus/dis/erasenet=第三方模型预测脚本或权重；'
+            'lama=LaMa 生成式修复，默认尝试 IOPaint，也可配合 --model-command 和 {mask}；'
             'torchscript=直接加载 TorchScript/完整 PyTorch 模型'
         ),
     )
@@ -1634,9 +1987,10 @@ def main():
         '--model-command',
         default=None,
         help=(
-            '第三方仓库预测命令模板，可用 {input} {staged_input} {output} '
+            '第三方仓库预测命令模板，可用 {input} {staged_input} {mask} {output} '
             '{input_dir} {output_dir} {repo} {checkpoint} {device}。'
             '若输出灰度图则按 mask 白填；若输出彩色图则直接作为清洁图。'
+            'lama 后端未设置该参数时会自动尝试 iopaint run。'
         ),
     )
     parser.add_argument(
