@@ -8,15 +8,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH into server and pull latest code
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.ALIYUN_HOST }}
-          username: ${{ secrets.ALIYUN_USER }}
-          port: ${{ secrets.ALIYUN_PORT || 22 }}
-          key: ${{ secrets.ALIYUN_SSH_KEY }}
-          script_stop: true
-          script: |
-            cd /home/project/ai_exploration
-            git pull
-            echo "✅ Deploy completed at $(date)"
+          ssh-private-key: ${{ secrets.ALIYUN_SSH_KEY }}
+
+      - name: SSH into server and pull latest code
+        run: |
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.ALIYUN_PORT || 22 }} \
+            ${{ secrets.ALIYUN_USER }}@${{ secrets.ALIYUN_HOST }} \
+            "cd /home/project/ai_exploration && git pull && echo '✅ Deploy completed at $(date)'"
