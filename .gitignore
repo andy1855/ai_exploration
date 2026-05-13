@@ -54,6 +54,9 @@ aliyun-cli-macosx-latest-universal.tgz
 # Orphaned root lock file
 /package-lock.json
 
+# Third-party libraries (not maintained by us)
+third-party-libs/
+
 # Generated output & large input data
 wrong-answers-collector/cleaned/
 wrong-answers-collector/raw.jpg
