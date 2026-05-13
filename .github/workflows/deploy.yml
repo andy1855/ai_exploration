@@ -1,0 +1,21 @@
+name: Deploy to Aliyun Server
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into server and pull latest code
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ALIYUN_HOST }}
+          username: ${{ secrets.ALIYUN_USER }}
+          port: ${{ secrets.ALIYUN_PORT || 22 }}
+          key: ${{ secrets.ALIYUN_SSH_KEY }}
+          script: |
+            cd /home/project/ai_exploration
+            git pull
+            echo "✅ Deploy completed at $(date)"

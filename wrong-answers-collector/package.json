@@ -1,0 +1,17 @@
+{
+  "name": "erase-subagent",
+  "version": "1.0.0",
+  "description": "Cursor SDK subagent for exam-paper handwriting erasure",
+  "type": "module",
+  "scripts": {
+    "erase": "tsx erase_subagent.ts"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.12"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3",
+    "@types/node": "^22.15.3"
+  }
+}

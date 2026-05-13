@@ -16,7 +16,8 @@ build/
 *.tar.gz
 *.zip
 .idea/
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .DS_Store
 *.bak
 *.swp
@@ -40,3 +41,20 @@ coverage.xml
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# AliCloud CLI
+aliyun
+aliyun-mcp-server/aliyun
+aliyun-cli-macosx-latest-universal.tgz
+*.tgz
+
+# Environment files
+.env
+
+# Orphaned root lock file
+/package-lock.json
+
+# Generated output & large input data
+wrong-answers-collector/cleaned/
+wrong-answers-collector/raw.jpg
+wrong-answers-collector/*.png

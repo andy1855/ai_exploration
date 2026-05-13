@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "aliyun": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/aliyun-mcp-server/dist/index.js"],
+      "env": {
+        "ALIYUN_REGION": "cn-hangzhou"
+      }
+    }
+  }
+}
