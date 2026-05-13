@@ -3,18 +3,20 @@ import { useNoteStore } from '../store/useNoteStore';
 import {
   Folder,
   FileText,
+  FileCode,
+  FileType,
   Plus,
   Trash2,
   ChevronRight,
   ChevronDown,
   Search,
-  Settings,
   Sun,
   Moon,
   ListMusic,
+  Code,
+  File,
 } from 'lucide-react';
-
-const GROUP_ICONS = ['📝', '📓', '📕', '📗', '📘', '📙', '📚', '✏️', '🎯', '💡', '🗂️', '📋'];
+import { CreateSheetModal } from './CreateSheetModal';
 
 export function Sidebar() {
   const {
@@ -27,7 +29,6 @@ export function Sidebar() {
     preferences,
     selectSheet,
     selectGroup,
-    createSheet,
     createGroup,
     deleteSheet,
     deleteGroup,
@@ -38,10 +39,17 @@ export function Sidebar() {
 
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
 
   // Get root groups and ungrouped sheets
   const rootGroups = getChildGroups(null);
   const ungroupedSheets = getSheetsByGroup(null);
+
+  const openCreateModal = (groupId?: string) => {
+    setCreateInGroupId(groupId);
+    setShowCreateModal(true);
+  };
 
   const handleGroupDoubleClick = (group: { id: string; name: string }) => {
     setEditingGroupId(group.id);
@@ -74,7 +82,7 @@ export function Sidebar() {
       <div className="sidebar-header">
         <div className="sidebar-title">
           <ListMusic size={20} />
-          <span>文稿库</span>
+          <span>Ulysses Note</span>
         </div>
         <div className="sidebar-header-actions">
           <button
@@ -101,7 +109,7 @@ export function Sidebar() {
 
       {/* Quick actions */}
       <div className="sidebar-actions">
-        <button className="action-btn" onClick={() => createSheet()}>
+        <button className="action-btn" onClick={() => openCreateModal()}>
           <Plus size={14} />
           <span>新建文稿</span>
         </button>
@@ -125,7 +133,7 @@ export function Sidebar() {
             editName={editName}
             onSelectGroup={() => selectGroup(group.id)}
             onSelectSheet={selectSheet}
-            onCreateSheet={() => createSheet(group.id)}
+            onCreateSheetInGroup={(gid) => openCreateModal(gid)}
             onDeleteGroup={() => {
               if (confirm(`删除分组"${group.name}"？分组内的文稿将移出分组。`)) {
                 deleteGroup(group.id);
@@ -178,6 +186,14 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {/* Create modal */}
+      {showCreateModal && (
+        <CreateSheetModal
+          groupId={createInGroupId}
+          onClose={() => setShowCreateModal(false)}
+        />
+      )}
     </aside>
   );
 }
@@ -191,13 +207,19 @@ interface GroupItemProps {
   editName: string;
   onSelectGroup: () => void;
   onSelectSheet: (id: string) => void;
-  onCreateSheet: () => void;
   onDeleteGroup: () => void;
   onDeleteSheet: (id: string) => void;
   onStartEdit: () => void;
   onEditNameChange: (name: string) => void;
   onSubmitEdit: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
+  onCreateSheetInGroup: (groupId: string) => void;
+}
+
+function getSheetIcon(type?: string, language?: string | null) {
+  if (type === 'code') return <Code size={14} />;
+  if (type === 'markdown') return <FileType size={14} />;
+  return <File size={14} />;
 }
 
 function GroupItem({
@@ -209,13 +231,13 @@ function GroupItem({
   editName,
   onSelectGroup,
   onSelectSheet,
-  onCreateSheet,
   onDeleteGroup,
   onDeleteSheet,
   onStartEdit,
   onEditNameChange,
   onSubmitEdit,
   onKeyDown,
+  onCreateSheetInGroup,
 }: GroupItemProps) {
   const { groups: allGroups, getChildGroups, getSheetsByGroup, updateGroup } = useNoteStore();
   const [collapsed, setCollapsed] = useState(group.collapsed ?? false);
@@ -224,6 +246,7 @@ function GroupItem({
   const childSheets = getSheetsByGroup(group.id);
 
   const isSelected = selectedGroupId === group.id;
+  const hasChildren = childGroups.length > 0 || childSheets.length > 0;
 
   const toggleCollapse = () => {
     const next = !collapsed;
@@ -231,12 +254,17 @@ function GroupItem({
     updateGroup(group.id, { collapsed: next });
   };
 
+  const handleGroupClick = () => {
+    if (hasChildren) toggleCollapse();
+    onSelectGroup();
+  };
+
   return (
     <div className="group-wrapper">
       <div
         className={`group-item ${isSelected ? 'active' : ''}`}
         style={{ paddingLeft: 12 + level * 16 }}
-        onClick={onSelectGroup}
+        onClick={handleGroupClick}
       >
         <button
           className="collapse-btn"
@@ -245,7 +273,11 @@ function GroupItem({
             toggleCollapse();
           }}
         >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          {hasChildren ? (
+            collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />
+          ) : (
+            <span style={{ width: 12 }} />
+          )}
         </button>
         <Folder size={16} className="group-icon" />
 
@@ -266,7 +298,7 @@ function GroupItem({
         )}
 
         <div className="group-actions" onClick={(e) => e.stopPropagation()}>
-          <button className="item-action-btn" onClick={onCreateSheet} title="新建文稿">
+          <button className="item-action-btn" onClick={() => onCreateSheetInGroup(group.id)} title="新建文稿">
             <Plus size={12} />
           </button>
           <button className="item-action-btn" onClick={onDeleteGroup} title="删除分组">
@@ -289,7 +321,6 @@ function GroupItem({
               editName=""
               onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
               onSelectSheet={onSelectSheet}
-              onCreateSheet={() => useNoteStore.getState().createSheet(cg.id)}
               onDeleteGroup={() => {
                 if (confirm(`删除分组"${cg.name}"？`)) {
                   useNoteStore.getState().deleteGroup(cg.id);
@@ -300,6 +331,7 @@ function GroupItem({
               onEditNameChange={() => {}}
               onSubmitEdit={() => {}}
               onKeyDown={() => {}}
+              onCreateSheetInGroup={onCreateSheetInGroup}
             />
           ))}
 
@@ -311,8 +343,11 @@ function GroupItem({
               style={{ paddingLeft: 12 + (level + 1) * 16 }}
               onClick={() => onSelectSheet(sheet.id)}
             >
-              <FileText size={14} className="sheet-icon" />
+              {getSheetIcon(sheet.type, sheet.language)}
               <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
+              {sheet.type === 'code' && sheet.language && (
+                <span className="sheet-lang-badge">{sheet.language}</span>
+              )}
               <button
                 className="item-delete-btn"
                 onClick={(e) => {

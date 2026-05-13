@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Sheet, Group, AppPreferences } from '../types';
+import type { Sheet, Group, AppPreferences, SheetType } from '../types';
 
 const STORAGE_KEY = 'ulysses-note-data';
 const PREFS_KEY = 'ulysses-note-preferences';
@@ -55,7 +55,7 @@ interface NoteState {
   searchQuery: string;
 
   // Sheet actions
-  createSheet: (groupId?: string) => string;
+  createSheet: (groupId?: string, type?: SheetType, language?: string | null) => string;
   updateSheet: (id: string, updates: Partial<Sheet>) => void;
   deleteSheet: (id: string) => void;
   moveSheet: (id: string, groupId: string | null) => void;
@@ -91,15 +91,18 @@ export const useNoteStore = create<NoteState>((set, get) => {
     preferences: initialPrefs,
     searchQuery: '',
 
-    createSheet: (groupId?: string) => {
+    createSheet: (groupId?: string, type: SheetType = 'plain', language?: string | null) => {
       const now = Date.now();
+      const title = type === 'markdown' ? '未命名文档' : type === 'code' ? `未命名${language || '代码'}` : '未命名文稿';
       const newSheet: Sheet = {
         id: uuidv4(),
-        title: '未命名文稿',
-        content: '',
+        title,
+        content: type === 'markdown' ? '# 标题\n\n开始写作...' : '',
         createdAt: now,
         updatedAt: now,
         groupId: groupId ?? null,
+        type,
+        language: language ?? null,
         wordCount: 0,
       };
       set((state) => {

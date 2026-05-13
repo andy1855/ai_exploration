@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import MDEditor from '@uiw/react-md-editor';
 import { useNoteStore } from '../store/useNoteStore';
 import {
-  Sun,
-  Moon,
   Eye,
   EyeOff,
   Maximize2,
   Minimize2,
   Trash2,
   FileText,
-  Type,
   AlertCircle,
+  FileCode,
+  FileType,
+  File,
 } from 'lucide-react';
 
 export function Editor() {
@@ -29,7 +29,9 @@ export function Editor() {
   const [title, setTitle] = useState(sheet?.title ?? '');
   const [content, setContent] = useState(sheet?.content ?? '');
   const titleRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Sync local state when switching sheets
   useEffect(() => {
@@ -61,6 +63,12 @@ export function Editor() {
     save(title, newContent);
   };
 
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newContent = e.target.value;
+    setContent(newContent);
+    save(title, newContent);
+  };
+
   const togglePreview = () => {
     updatePreferences({ showPreview: !preferences.showPreview });
   };
@@ -75,6 +83,16 @@ export function Editor() {
       deleteSheet(selectedSheetId);
     }
   };
+
+  // Determine sheet type icon
+  const typeIcon = useMemo(() => {
+    if (!sheet) return null;
+    switch (sheet.type) {
+      case 'code': return <FileCode size={14} />;
+      case 'markdown': return <FileType size={14} />;
+      default: return <File size={14} />;
+    }
+  }, [sheet]);
 
   if (!sheet) {
     return (
@@ -95,12 +113,19 @@ export function Editor() {
   }
 
   const isDark = preferences.theme === 'dark';
+  const isMarkdown = sheet.type === 'markdown';
+  const isCode = sheet.type === 'code';
 
   return (
-    <div className={`editor-container ${preferences.focusMode ? 'focus-mode' : ''}`}>
+    <div className={`editor-container ${preferences.focusMode ? 'focus-mode' : ''}`} ref={editorContainerRef}>
       {/* Toolbar */}
       <div className="editor-toolbar">
         <div className="toolbar-left">
+          {typeIcon}
+          <span className="toolbar-type-badge">
+            {isCode ? sheet.language || '代码' : isMarkdown ? 'Markdown' : '纯文本'}
+          </span>
+          <span className="toolbar-divider">|</span>
           <span className="toolbar-wordcount">
             {sheet.wordCount ?? 0} 字
           </span>
@@ -112,13 +137,15 @@ export function Editor() {
           )}
         </div>
         <div className="toolbar-right">
-          <button
-            className={`toolbar-btn ${preferences.showPreview ? 'active' : ''}`}
-            onClick={togglePreview}
-            title={preferences.showPreview ? '隐藏预览' : '显示预览'}
-          >
-            {preferences.showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
-          </button>
+          {isMarkdown && (
+            <button
+              className={`toolbar-btn ${preferences.showPreview ? 'active' : ''}`}
+              onClick={togglePreview}
+              title={preferences.showPreview ? '隐藏预览' : '显示预览'}
+            >
+              {preferences.showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>
+          )}
           <button
             className={`toolbar-btn ${preferences.focusMode ? 'active' : ''}`}
             onClick={toggleFocusMode}
@@ -148,20 +175,33 @@ export function Editor() {
         />
       </div>
 
-      {/* Markdown Editor */}
-      <div className="editor-content" data-color-mode={isDark ? 'dark' : 'light'}>
-        <MDEditor
-          value={content}
-          onChange={handleContentChange}
-          preview={preferences.showPreview ? 'preview' : 'edit'}
-          height="100%"
-          visibleDragbar={false}
-          highlightEnable={true}
-          textareaProps={{
-            placeholder: '开始写作...',
-          }}
-        />
-      </div>
+      {/* Editor body — variant based on sheet type */}
+      {isMarkdown ? (
+        <div className="editor-content" data-color-mode={isDark ? 'dark' : 'light'}>
+          <MDEditor
+            value={content}
+            onChange={handleContentChange}
+            preview={preferences.showPreview ? 'live' : 'edit'}
+            height="100%"
+            visibleDragbar={false}
+            highlightEnable={true}
+            textareaProps={{
+              placeholder: '开始写作...',
+            }}
+          />
+        </div>
+      ) : (
+        <div className={`editor-content-plain ${isCode ? 'code-editor' : ''}`}>
+          <textarea
+            ref={textareaRef}
+            className="editor-textarea"
+            placeholder={isCode ? '// 在此编写代码...' : '开始写作...'}
+            value={content}
+            onChange={handleTextareaChange}
+            spellCheck={!isCode}
+          />
+        </div>
+      )}
     </div>
   );
 }
