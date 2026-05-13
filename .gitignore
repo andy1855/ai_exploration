@@ -57,6 +57,9 @@ aliyun-cli-macosx-latest-universal.tgz
 # Third-party libraries (not maintained by us)
 third-party-libs/
 
+# Local docs (not pushed to remote)
+docs/
+
 # Generated output & large input data
 wrong-answers-collector/cleaned/
 wrong-answers-collector/raw.jpg
