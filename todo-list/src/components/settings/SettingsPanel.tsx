@@ -317,8 +317,24 @@ export function SettingsPanel() {
               </div>
             )}
           </section>
+
+          {/* 保存到服务器 */}
+          <div className={styles.saveRow}>
+            <SaveButton />
+          </div>
         </div>
       </aside>
     </div>
+  )
+}
+
+function SaveButton() {
+  const syncConfig = useStore((s) => s.syncConfig)
+  const error = useStore((s) => s.error)
+
+  return (
+    <button className={styles.saveBtn} onClick={() => syncConfig()}>
+      {error ? '⚠ 保存出错，重试' : '💾 保存设置到服务器'}
+    </button>
   )
 }

@@ -2,114 +2,29 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Task, AppConfig, ListId } from '@/types'
 import { defaultConfig } from '@/config/defaults'
-
-function uid(): string {
-  // crypto.randomUUID() 仅在 HTTPS 下可用，HTTP 下回退到 Math.random
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
-
-function todayStr(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
-function offsetDate(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
-}
-
-const SEED_TASKS: Task[] = [
-  {
-    id: uid(),
-    title: '整理试卷 OCR 管线验收标准',
-    description: '补充题干完整性、题号保留、底部清洁三项指标的量化说明',
-    done: false,
-    priority: 'high',
-    dueDate: todayStr(),
-    tags: ['工作', '文档'],
-    listId: 'inbox',
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    subtasks: [
-      { id: uid(), title: '量化题干完整性阈值', done: false },
-      { id: uid(), title: '补充图形保留判定规则', done: true },
-    ],
-  },
-  {
-    id: uid(),
-    title: '实现 reminders.quietHours 浏览器通知联调',
-    description: '',
-    done: false,
-    priority: 'medium',
-    dueDate: offsetDate(7),
-    tags: ['工作', '开发'],
-    listId: 'inbox',
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    subtasks: [],
-  },
-  {
-    id: uid(),
-    title: '补充深色主题对比度自检',
-    description: 'WCAG AA 最低 4.5:1',
-    done: false,
-    priority: 'low',
-    dueDate: offsetDate(-2),
-    tags: ['设计'],
-    listId: 'inbox',
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    subtasks: [],
-  },
-  {
-    id: uid(),
-    title: '核对 config.schema.json 字段与 UI 绑定',
-    description: '',
-    done: true,
-    priority: 'medium',
-    dueDate: offsetDate(-1),
-    tags: ['开发'],
-    listId: 'inbox',
-    createdAt: new Date().toISOString(),
-    completedAt: new Date().toISOString(),
-    subtasks: [],
-  },
-  {
-    id: uid(),
-    title: '阅读《深度学习》第 5 章',
-    description: '',
-    done: false,
-    priority: 'low',
-    dueDate: offsetDate(3),
-    tags: ['学习'],
-    listId: 'inbox',
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    subtasks: [],
-  },
-]
+import { api } from '@/api'
 
 interface StoreState {
   tasks: Task[]
   config: AppConfig
+  loading: boolean
+  error: string | null
   currentListId: ListId
   isTaskFormOpen: boolean
   editingTaskId: string | null
   isSettingsOpen: boolean
 
+  // Data loading
+  fetchTasks: () => Promise<void>
+  fetchConfig: () => Promise<void>
+
   // Task actions
-  addTask: (data: Omit<Task, 'id' | 'createdAt' | 'completedAt'>) => void
-  updateTask: (id: string, patch: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
-  toggleTask: (id: string) => void
-  deleteTask: (id: string) => void
-  addSubtask: (taskId: string, title: string) => void
-  toggleSubtask: (taskId: string, subtaskId: string) => void
+  addTask: (data: Omit<Task, 'id' | 'createdAt' | 'completedAt'>) => Promise<void>
+  updateTask: (id: string, patch: Partial<Omit<Task, 'id' | 'createdAt'>>) => Promise<void>
+  toggleTask: (id: string) => Promise<void>
+  deleteTask: (id: string) => Promise<void>
+  addSubtask: (taskId: string, title: string) => Promise<void>
+  toggleSubtask: (taskId: string, subtaskId: string) => Promise<void>
 
   // Navigation
   setCurrentListId: (id: ListId) => void
@@ -122,37 +37,67 @@ interface StoreState {
 
   // Config
   updateConfig: <K extends keyof AppConfig>(section: K, value: AppConfig[K]) => void
+  syncConfig: () => Promise<void>
 }
 
 export const useStore = create<StoreState>()(
   persist(
-    (set) => ({
-      tasks: SEED_TASKS,
+    (set, get) => ({
+      tasks: [],
       config: defaultConfig,
+      loading: true,
+      error: null,
       currentListId: 'inbox',
       isTaskFormOpen: false,
       editingTaskId: null,
       isSettingsOpen: false,
 
-      addTask: (data) =>
-        set((s) => ({
-          tasks: [
-            ...s.tasks,
-            {
-              ...data,
-              id: uid(),
-              createdAt: new Date().toISOString(),
-              completedAt: null,
-            },
-          ],
-        })),
+      // ── 数据加载 ─────────────────────────────────────
+      fetchTasks: async () => {
+        try {
+          set({ loading: true, error: null })
+          const tasks = await api.fetchTasks()
+          set({ tasks, loading: false })
+        } catch (e) {
+          set({ error: (e as Error).message, loading: false })
+        }
+      },
 
-      updateTask: (id, patch) =>
+      fetchConfig: async () => {
+        try {
+          const config = await api.fetchConfig()
+          set({ config })
+        } catch {
+          // 服务器无配置时忽略，用默认值
+        }
+      },
+
+      // ── 任务 CRUD ────────────────────────────────────
+      addTask: async (data) => {
+        try {
+          set({ error: null })
+          const task = await api.createTask(data)
+          set((s) => ({ tasks: [task, ...s.tasks] }))
+        } catch (e) {
+          set({ error: (e as Error).message })
+        }
+      },
+
+      updateTask: async (id, patch) => {
+        const prev = get().tasks
+        // 乐观更新
         set((s) => ({
           tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-        })),
+        }))
+        try {
+          await api.updateTask(id, patch)
+        } catch (e) {
+          set({ tasks: prev, error: (e as Error).message })
+        }
+      },
 
-      toggleTask: (id) =>
+      toggleTask: async (id) => {
+        const prev = get().tasks
         set((s) => ({
           tasks: s.tasks.map((t) =>
             t.id === id
@@ -163,39 +108,52 @@ export const useStore = create<StoreState>()(
                 }
               : t,
           ),
-        })),
+        }))
+        try {
+          await api.toggleTask(id)
+        } catch (e) {
+          set({ tasks: prev, error: (e as Error).message })
+        }
+      },
 
-      deleteTask: (id) =>
-        set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
+      deleteTask: async (id) => {
+        const prev = get().tasks
+        set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
+        try {
+          await api.deleteTask(id)
+        } catch (e) {
+          set({ tasks: prev, error: (e as Error).message })
+        }
+      },
 
-      addSubtask: (taskId, title) =>
-        set((s) => ({
-          tasks: s.tasks.map((t) =>
-            t.id === taskId
-              ? {
-                  ...t,
-                  subtasks: [...t.subtasks, { id: uid(), title, done: false }],
-                }
-              : t,
-          ),
-        })),
+      addSubtask: async (taskId, title) => {
+        try {
+          set({ error: null })
+          const updated = await api.addSubtask(taskId, title)
+          set((s) => ({
+            tasks: s.tasks.map((t) => (t.id === taskId ? updated : t)),
+          }))
+        } catch (e) {
+          set({ error: (e as Error).message })
+        }
+      },
 
-      toggleSubtask: (taskId, subtaskId) =>
-        set((s) => ({
-          tasks: s.tasks.map((t) =>
-            t.id === taskId
-              ? {
-                  ...t,
-                  subtasks: t.subtasks.map((st) =>
-                    st.id === subtaskId ? { ...st, done: !st.done } : st,
-                  ),
-                }
-              : t,
-          ),
-        })),
+      toggleSubtask: async (taskId, subtaskId) => {
+        try {
+          set({ error: null })
+          const updated = await api.toggleSubtask(taskId, subtaskId)
+          set((s) => ({
+            tasks: s.tasks.map((t) => (t.id === taskId ? updated : t)),
+          }))
+        } catch (e) {
+          set({ error: (e as Error).message })
+        }
+      },
 
+      // ── 导航 ─────────────────────────────────────────
       setCurrentListId: (id) => set({ currentListId: id }),
 
+      // ── UI ────────────────────────────────────────────
       openTaskForm: (editId) =>
         set({ isTaskFormOpen: true, editingTaskId: editId ?? null }),
       closeTaskForm: () =>
@@ -204,8 +162,17 @@ export const useStore = create<StoreState>()(
       openSettings: () => set({ isSettingsOpen: true }),
       closeSettings: () => set({ isSettingsOpen: false }),
 
+      // ── 配置 ─────────────────────────────────────────
       updateConfig: (section, value) =>
         set((s) => ({ config: { ...s.config, [section]: value } })),
+
+      syncConfig: async () => {
+        try {
+          await api.saveConfig(get().config)
+        } catch (e) {
+          set({ error: (e as Error).message })
+        }
+      },
     }),
     {
       name: 'todolist:v1:store',

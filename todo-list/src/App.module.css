@@ -11,6 +11,26 @@
   overflow: hidden;
 }
 
+.errorBanner {
+  background: var(--color-danger);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  padding: 8px 16px;
+  text-align: center;
+}
+
+.loadingBar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent) 30%, transparent 30%);
+  background-size: 200% 100%;
+  animation: shimmer 1s linear infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
 .main {
   flex: 1;
   padding: var(--space-5);
