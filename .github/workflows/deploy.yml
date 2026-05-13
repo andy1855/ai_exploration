@@ -15,6 +15,7 @@ jobs:
           username: ${{ secrets.ALIYUN_USER }}
           port: ${{ secrets.ALIYUN_PORT || 22 }}
           key: ${{ secrets.ALIYUN_SSH_KEY }}
+          script_stop: true
           script: |
             cd /home/project/ai_exploration
             git pull
