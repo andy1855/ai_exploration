@@ -65,8 +65,9 @@ export const useStore = create<StoreState>()(
 
       fetchConfig: async () => {
         try {
-          const config = await api.fetchConfig()
-          set({ config })
+          const serverConfig = await api.fetchConfig()
+          // 合并服务器配置与默认值，服务器返回空 {} 时不会丢失默认字段
+          set({ config: { ...defaultConfig, ...serverConfig } })
         } catch {
           // 服务器无配置时忽略，用默认值
         }
