@@ -176,8 +176,13 @@ export const useStore = create<StoreState>()(
       },
     }),
     {
-      name: 'todolist:v1:store',
+      name: 'todolist:v2:store',
       partialize: (s) => ({ tasks: s.tasks, config: s.config }),
+      version: 2,
+      migrate: (persisted, version) => {
+        if (version !== 2) return { tasks: [], config: defaultConfig }
+        return persisted as { tasks: Task[]; config: AppConfig }
+      },
     },
   ),
 )
