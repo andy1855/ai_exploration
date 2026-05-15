@@ -4,79 +4,54 @@ on:
   push:
     branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: ulysses-note/package-lock.json
-
-      - name: Build frontend
-        working-directory: ulysses-note
-        run: npm ci && npm run build
-
-      - name: Build backend
-        working-directory: ulysses-note/server
-        run: npm ci && npm run build
-
-      - name: Setup SSH key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.ALIYUN_SSH_KEY }}
-
-      - name: Deploy frontend dist to server
+      - name: Setup SSH
         run: |
-          rsync -avz --delete \
-            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.ALIYUN_PORT || 22 }}" \
-            ulysses-note/dist/ \
-            ${{ secrets.ALIYUN_USER }}@${{ secrets.ALIYUN_HOST }}:/var/www/ulysses-note/
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ALIYUN_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H -p ${{ secrets.ALIYUN_PORT || 22 }} ${{ secrets.ALIYUN_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy backend to server and restart
+      - name: Pull, build and restart on server
         run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.ALIYUN_PORT || 22 }} \
+          ssh -p ${{ secrets.ALIYUN_PORT || 22 }} \
             ${{ secrets.ALIYUN_USER }}@${{ secrets.ALIYUN_HOST }} << 'EOF'
             set -e
             cd /home/project/ai_exploration
             git pull
 
-            # Backend: install prod deps and copy built dist
-            cd ulysses-note/server
-            npm ci --omit=dev
+            # ── Frontend ──────────────────────────────────────
+            cd ulysses-note
+            npm ci
+            npm run build
+            mkdir -p /var/www/ulysses-note
+            cp -r dist/. /var/www/ulysses-note/
 
-            # Ensure PM2 is available
+            # ── Backend ───────────────────────────────────────
+            cd server
+            npm ci
+            npm run build
+
             if ! command -v pm2 &>/dev/null; then
               npm install -g pm2
             fi
 
-            # Create data dir if needed
             mkdir -p /home/project/ulysses-note-data
 
-            # Start or restart backend
             pm2 describe ulysses-note-server > /dev/null 2>&1 \
               && pm2 restart ulysses-note-server \
               || pm2 start dist/index.js \
                    --name ulysses-note-server \
-                   --env production \
-                   -- \
-                   DB_PATH=/home/project/ulysses-note-data/ulysses.db \
-                   PORT=3001
-
+                   --env production
             pm2 save
+
+            # ── Nginx (update proxy port once if needed) ──────
+            sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:3001|g' \
+              /etc/nginx/conf.d/*.conf 2>/dev/null || true
+            nginx -t && nginx -s reload
+
             echo "✅ Deploy completed at $(date)"
           EOF
-
-      - name: Update nginx proxy port (idempotent)
-        run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.ALIYUN_PORT || 22 }} \
-            ${{ secrets.ALIYUN_USER }}@${{ secrets.ALIYUN_HOST }} \
-            "sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:3001|g' /etc/nginx/conf.d/*.conf && nginx -t && nginx -s reload || true"
