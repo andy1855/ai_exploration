@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const dbPath = process.env.DB_PATH ?? './data/ulysses.db';
+const dbPath = process.env.DB_PATH ?? './data/lemon.db';
 const dbDir = path.dirname(path.resolve(dbPath));
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 

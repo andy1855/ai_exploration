@@ -146,6 +146,8 @@ export function Editor() {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const plainMirrorRef = useRef<HTMLPreElement>(null);
   const searchScrollKeyRef = useRef<string>('');
+  const mutationObserverRef = useRef<MutationObserver | null>(null);
+  const applyMarksTimerRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   const isMarkdown = sheet?.type === 'markdown';
   const isCode = sheet?.type === 'code';
@@ -175,12 +177,12 @@ export function Editor() {
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
-  // Markdown / 预览：注入全部黄色高亮（随正文编辑刷新）
-  useLayoutEffect(() => {
+  /** 在 Markdown 编辑器的预览区 / 编辑区注入搜索高亮 */
+  const applyMarkdownSearchMarks = useCallback(() => {
     const root = editorContainerRef.current;
-    if (!root || !sheet || !isMarkdown) return;
-
+    if (!root || !isMarkdown) return;
     const q = searchQuery.trim();
+    if (!q) return;
 
     if (preferences.showPreview) {
       const preview = root.querySelector('.wmde-markdown');
@@ -193,7 +195,51 @@ export function Editor() {
     if (pre) {
       injectSearchMarksIntoRoot(pre as Element, q, (t) => inSkippableContext(t, pre as Element));
     }
-  }, [content, searchQuery, sheet, isMarkdown, preferences.showPreview]);
+  }, [isMarkdown, searchQuery, preferences.showPreview]);
+
+  // Markdown / 预览：注入全部黄色高亮（随正文编辑刷新）
+  // 使用 useLayoutEffect 确保在浏览器绘制前注入
+  useLayoutEffect(() => {
+    if (!sheet || !isMarkdown) return;
+    applyMarkdownSearchMarks();
+  }, [content, searchQuery, sheet, isMarkdown, preferences.showPreview, applyMarkdownSearchMarks]);
+
+  // 由于 @uiw/react-md-editor 的预览是异步渲染的，会在 useLayoutEffect 之后
+  // 重新渲染 DOM，清除掉我们注入的 <mark>。用 MutationObserver 兜底。
+  useEffect(() => {
+    const root = editorContainerRef.current;
+    if (!root || !isMarkdown || !searchQuery.trim()) return;
+
+    // 断开旧的 observer
+    if (mutationObserverRef.current) {
+      mutationObserverRef.current.disconnect();
+    }
+
+    const observer = new MutationObserver(() => {
+      // 防抖：500ms 内多次 DOM 变化只做一次
+      if (applyMarksTimerRef.current) {
+        cancelAnimationFrame(applyMarksTimerRef.current);
+      }
+      applyMarksTimerRef.current = requestAnimationFrame(() => {
+        applyMarkdownSearchMarks();
+      });
+    });
+
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: false,
+    });
+
+    mutationObserverRef.current = observer;
+
+    return () => {
+      observer.disconnect();
+      if (applyMarksTimerRef.current) {
+        cancelAnimationFrame(applyMarksTimerRef.current);
+      }
+    };
+  }, [isMarkdown, searchQuery, sheet?.id, preferences.showPreview, applyMarkdownSearchMarks]);
 
   // 切换文档或搜索词变化时：滚动到第一处匹配（避免每次输入内容时重滚）
   useLayoutEffect(() => {
@@ -382,7 +428,7 @@ export function Editor() {
         <div className="empty-icon">
           <FileText size={48} />
         </div>
-        <h2>Ulysses Note</h2>
+        <h2>Lemon Note</h2>
         <p>选择一个文稿开始编辑，或创建一个新文稿</p>
         <button
           className="primary-btn"
@@ -573,6 +619,7 @@ export function Editor() {
             language={sheet.language}
             isDark={isDark}
             fontSize={preferences.editorFontSize - 2}
+            searchQuery={searchQuery}
           />
         </div>
       ) : (

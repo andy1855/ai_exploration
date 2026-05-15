@@ -1,8 +1,8 @@
 import type { Sheet, Group } from '../types';
 
-export const NOTES_STORAGE_KEY = 'ulysses-note-data';
-const DATA_FILE = 'ulysses-note-data.json';
-const IDB_NAME = 'ulysses-note-fs';
+export const NOTES_STORAGE_KEY = 'lemon-note-data';
+const DATA_FILE = 'lemon-note-data.json';
+const IDB_NAME = 'lemon-note-fs';
 const IDB_STORE = 'handles';
 const IDB_DIR_KEY = 'data-dir';
 
@@ -130,7 +130,7 @@ export async function bindLocalDataDirectory(): Promise<{ ok: boolean; message: 
     }
     await idbSetDirHandle(dir);
     directoryHandle = dir;
-    return { ok: true, message: '已选择本地目录，文稿将保存到该文件夹内的 ulysses-note-data.json。' };
+    return { ok: true, message: '已选择本地目录，文稿将保存到该文件夹内的 lemon-note-data.json。' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : '已取消';
     return { ok: false, message: msg };

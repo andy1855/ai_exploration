@@ -27,7 +27,7 @@ export async function sendEmailCode(email: string, code: string, purpose: string
     return;
   }
   await transporter.sendMail({
-    from: process.env.SMTP_FROM ?? 'Ulysses Note <noreply@example.com>',
+    from: process.env.SMTP_FROM ?? 'Lemon Note <noreply@example.com>',
     to: email,
     subject,
     text,

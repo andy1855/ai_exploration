@@ -113,7 +113,7 @@ export function AuthPage() {
       <div className="auth-card">
         <div className="auth-logo">
           <ListMusic size={28} />
-          <span>Ulysses Note</span>
+          <span>Lemon Note</span>
         </div>
 
         <div className="auth-tabs">

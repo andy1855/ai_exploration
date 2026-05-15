@@ -5,7 +5,7 @@ import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { persistNotes, loadNotesFromLocalStorage } from '../storage/notePersistence';
 
-const PREFS_KEY = 'ulysses-note-preferences';
+const PREFS_KEY = 'lemon-note-preferences';
 
 function loadData(): { sheets: Sheet[]; groups: Group[] } {
   return loadNotesFromLocalStorage();

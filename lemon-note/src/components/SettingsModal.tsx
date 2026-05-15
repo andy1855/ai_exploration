@@ -290,7 +290,7 @@ export function SettingsModal({ onClose }: Props) {
             <section className="settings-section">
               <h4 className="settings-section-title">本地目录</h4>
               <p className="settings-prose">
-                选择本机文件夹后，文稿会写入其中的 <code className="settings-inline-code">ulysses-note-data.json</code>。
+                选择本机文件夹后，文稿会写入其中的 <code className="settings-inline-code">lemon-note-data.json</code>。
                 需使用支持文件系统访问的 Chromium 内核浏览器（如 Chrome、Edge）。未选择时仍使用浏览器本地存储。
               </p>
               <div className={`settings-status-pill${usingLocalDir ? ' on' : ''}`}>
@@ -355,7 +355,7 @@ export function SettingsModal({ onClose }: Props) {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `ulysses-note-backup-${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
+                    a.download = `lemon-note-backup-${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
@@ -367,7 +367,7 @@ export function SettingsModal({ onClose }: Props) {
           )}
 
           <div className="settings-footer">
-            <span>Ulysses Note v1.1.0 · 文稿可存浏览器或自选本地文件夹</span>
+            <span>Lemon Note v1.1.0 · 文稿可存浏览器或自选本地文件夹</span>
           </div>
         </div>
       </div>

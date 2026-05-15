@@ -398,7 +398,7 @@ export function Sidebar() {
                 onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
                 onDragStart={(e) => handleDragStart(e, sheet.id)}
                 onDragEnd={handleDragEnd}
-                paddingLeft={12}
+                paddingLeft={16}
               />
             );
           })}
@@ -495,7 +495,7 @@ export function Sidebar() {
                 onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
                 onDragStart={(e) => handleDragStart(e, sheet.id)}
                 onDragEnd={handleDragEnd}
-                paddingLeft={12}
+                paddingLeft={16}
               />
             ))}
           </div>
@@ -729,7 +729,7 @@ function GroupItem({
     <div className="group-wrapper">
       <div
         className={`group-item ${isSelected ? 'active' : ''} ${isDragOver ? 'drag-over' : ''}`}
-        style={{ paddingLeft: 12 + level * 16 }}
+        style={{ paddingLeft: 12 + level * 20 }}
         onClick={() => { if (hasChildren) toggleCollapse(); onSelectGroup(); }}
         onContextMenu={(e) => onContextMenuGroup?.(e, group.id, group.name)}
         onDragOver={(e) => onGroupDragOver(e, group.id)}
@@ -776,77 +776,105 @@ function GroupItem({
 
       {!collapsed && (
         <div className="group-children">
-          {childGroups.map((cg) => (
-            <GroupItem
-              key={cg.id}
-              group={cg}
-              level={level + 1}
-              selectedGroupId={selectedGroupId}
-              selectedSheetId={selectedSheetId}
-              selectedIds={selectedIds}
-              batchMode={batchMode}
-              draggingId={draggingId}
-              dragOverGroupId={dragOverGroupId}
-              editingGroupId={editingGroupId}
-              editName={editName}
-              renamingSheetId={renamingSheetId}
-              renameValue={renameValue}
-              searchQuery={searchQuery}
-              onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
-              onSelectSheet={onSelectSheet}
-              onToggleSelect={onToggleSelect}
-              onToggleCheck={onToggleCheck}
-              onCreateSheetInGroup={onCreateSheetInGroup}
-              onDeleteGroup={() => useNoteStore.getState().deleteGroup(cg.id)}
-              onDeleteSheet={onDeleteSheet}
-              onEditNameChange={onEditNameChange}
-              onSubmitEdit={onSubmitEdit}
-              onKeyDown={onKeyDown}
-              onSetEditingGroupId={onSetEditingGroupId}
-              onContextMenuGroup={onContextMenuGroup}
-              onContextMenuSheet={onContextMenuSheet}
-              onRenameSheet={onRenameSheet}
-              onRenameChange={onRenameChange}
-              onRenameSubmit={onRenameSubmit}
-              onRenameCancel={onRenameCancel}
-              onDragStart={onDragStart}
-              onDragEnd={onDragEnd}
-              onGroupDragOver={onGroupDragOver}
-              onGroupDrop={onGroupDrop}
+          {/* 树状引导线：每级一条竖线贯穿子节点区域 */}
+          {Array.from({ length: level + 1 }, (_, i) => (
+            <div
+              key={`guide-${i}`}
+              className="tree-guide"
+              style={{ left: 12 + i * 20 + 7 }}
             />
           ))}
-          {childSheets.map((sheet) => (
-            <SheetItem
-              key={sheet.id}
-              sheet={sheet}
-              isSelected={selectedSheetId === sheet.id}
-              isChecked={selectedIds.has(sheet.id)}
-              isDragging={draggingId === sheet.id}
-              batchMode={batchMode}
-              renamingId={renamingSheetId}
-              renameValue={renameValue}
-              searchQuery={searchQuery}
-              snippet=""
-              onSelect={(e) => {
-                if (batchMode) {
-                  onToggleCheck(sheet.id);
-                } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
-                  onToggleSelect(sheet.id, e);
-                } else {
-                  onSelectSheet(sheet.id);
-                }
-              }}
-              onContextMenu={(e) => onContextMenuSheet?.(e, sheet.id, sheet.title)}
-              onToggleCheck={() => onToggleCheck(sheet.id)}
-              onRenameChange={onRenameChange}
-              onRenameSubmit={() => onRenameSubmit(sheet.id)}
-              onRenameCancel={onRenameCancel}
-              onDelete={() => onDeleteSheet(sheet.id, sheet.title)}
-              onDragStart={(e) => onDragStart(e, sheet.id)}
-              onDragEnd={onDragEnd}
-              paddingLeft={12 + (level + 1) * 16}
-            />
-          ))}
+
+          {childGroups.map((cg, idx) => {
+            const isLast = idx === childGroups.length - 1 && childSheets.length === 0;
+            return (
+              <div key={cg.id} style={{ position: 'relative' }}>
+                {/* L 形连接线 */}
+                <div
+                  className={`tree-guide-elbow ${isLast ? 'is-last' : ''}`}
+                  style={{ left: 12 + level * 20 + 7, bottom: isLast ? '50%' : 0 }}
+                />
+                <GroupItem
+                  group={cg}
+                  level={level + 1}
+                  selectedGroupId={selectedGroupId}
+                  selectedSheetId={selectedSheetId}
+                  selectedIds={selectedIds}
+                  batchMode={batchMode}
+                  draggingId={draggingId}
+                  dragOverGroupId={dragOverGroupId}
+                  editingGroupId={editingGroupId}
+                  editName={editName}
+                  renamingSheetId={renamingSheetId}
+                  renameValue={renameValue}
+                  searchQuery={searchQuery}
+                  onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
+                  onSelectSheet={onSelectSheet}
+                  onToggleSelect={onToggleSelect}
+                  onToggleCheck={onToggleCheck}
+                  onCreateSheetInGroup={onCreateSheetInGroup}
+                  onDeleteGroup={() => useNoteStore.getState().deleteGroup(cg.id)}
+                  onDeleteSheet={onDeleteSheet}
+                  onEditNameChange={onEditNameChange}
+                  onSubmitEdit={onSubmitEdit}
+                  onKeyDown={onKeyDown}
+                  onSetEditingGroupId={onSetEditingGroupId}
+                  onContextMenuGroup={onContextMenuGroup}
+                  onContextMenuSheet={onContextMenuSheet}
+                  onRenameSheet={onRenameSheet}
+                  onRenameChange={onRenameChange}
+                  onRenameSubmit={onRenameSubmit}
+                  onRenameCancel={onRenameCancel}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  onGroupDragOver={onGroupDragOver}
+                  onGroupDrop={onGroupDrop}
+                />
+              </div>
+            );
+          })}
+          {childSheets.map((sheet, idx) => {
+            const isLast = idx === childSheets.length - 1;
+            return (
+              <div key={sheet.id} style={{ position: 'relative' }}>
+                {/* L 形连接线 */}
+                <div
+                  className={`tree-guide-elbow ${isLast ? 'is-last' : ''}`}
+                  style={{ left: 12 + level * 20 + 7, bottom: isLast ? '50%' : 0 }}
+                />
+                <SheetItem
+                  key={sheet.id}
+                  sheet={sheet}
+                  isSelected={selectedSheetId === sheet.id}
+                  isChecked={selectedIds.has(sheet.id)}
+                  isDragging={draggingId === sheet.id}
+                  batchMode={batchMode}
+                  renamingId={renamingSheetId}
+                  renameValue={renameValue}
+                  searchQuery={searchQuery}
+                  snippet=""
+                  onSelect={(e) => {
+                    if (batchMode) {
+                      onToggleCheck(sheet.id);
+                    } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                      onToggleSelect(sheet.id, e);
+                    } else {
+                      onSelectSheet(sheet.id);
+                    }
+                  }}
+                  onContextMenu={(e) => onContextMenuSheet?.(e, sheet.id, sheet.title)}
+                  onToggleCheck={() => onToggleCheck(sheet.id)}
+                  onRenameChange={onRenameChange}
+                  onRenameSubmit={() => onRenameSubmit(sheet.id)}
+                  onRenameCancel={onRenameCancel}
+                  onDelete={() => onDeleteSheet(sheet.id, sheet.title)}
+                  onDragStart={(e) => onDragStart(e, sheet.id)}
+                  onDragEnd={onDragEnd}
+                  paddingLeft={12 + (level + 1) * 20}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

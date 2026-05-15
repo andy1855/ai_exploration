@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/ulysses-note/',
+  base: '/lemon-note/',
   server: {
     port: 3000,
     proxy: {
