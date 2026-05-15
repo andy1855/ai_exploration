@@ -9,6 +9,15 @@ const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret';
 const CODE_TTL = 10 * 60; // 10 minutes in seconds
 
+const NICK_ADJ = ['快乐', '聪明', '活泼', '勇敢', '温柔', '神秘', '优雅', '闪亮', '可爱', '开朗', '机智', '阳光', '清爽', '潇洒', '灵动', '奇妙'];
+const NICK_NOUN = ['猫咪', '狐狸', '海豚', '企鹅', '熊猫', '兔子', '松鼠', '猎豹', '猫头鹰', '独角兽', '飞龙', '星星', '月亮', '彩虹', '流星', '极光'];
+function generateNickname() {
+  const adj = NICK_ADJ[Math.floor(Math.random() * NICK_ADJ.length)];
+  const noun = NICK_NOUN[Math.floor(Math.random() * NICK_NOUN.length)];
+  const num = Math.floor(10 + Math.random() * 90);
+  return `${adj}的${noun}${num}`;
+}
+
 function isEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
@@ -133,7 +142,6 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
 
-  // Insert with placeholder nickname first, then update with generated ID-based name
   const result = db.prepare(`
     INSERT INTO users (email, phone, password, nickname)
     VALUES (?, ?, ?, ?)
@@ -145,7 +153,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   );
 
   const userId = result.lastInsertRowid as number;
-  const generatedNickname = nickname ?? `用户${String(userId).padStart(6, '0')}`;
+  const generatedNickname = nickname ?? generateNickname();
   db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(generatedNickname, userId);
   db.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').run(record.id);
 
