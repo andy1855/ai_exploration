@@ -4,9 +4,7 @@ import cors from 'cors';
 import authRouter from './routes/auth';
 import logsRouter from './routes/logs';
 import notesRouter from './routes/notes';
-
-// Initialize database on import
-import './database';
+import { initDb } from './database';
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 3001);
@@ -25,6 +23,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] running on port ${PORT}`);
+initDb().then(() => {
+  app.listen(PORT, () => {
+    console.log(`[server] running on port ${PORT}`);
+  });
+}).catch((err) => {
+  console.error('[server] failed to connect to MySQL:', err);
+  process.exit(1);
 });

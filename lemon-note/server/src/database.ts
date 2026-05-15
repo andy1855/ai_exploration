@@ -1,111 +1,45 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { type RowDataPacket, type ResultSetHeader, type Pool, createPool } from 'mysql2/promise';
 
-const dbPath = process.env.DB_PATH ?? './data/lemon.db';
-const dbDir = path.dirname(path.resolve(dbPath));
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+const MYSQL_CONFIG = {
+  host: process.env.MYSQL_HOST ?? '127.0.0.1',
+  port: Number(process.env.MYSQL_PORT ?? 3306),
+  user: process.env.MYSQL_USER ?? 'root',
+  password: process.env.MYSQL_PASSWORD ?? '',
+  database: process.env.MYSQL_DB ?? 'lemonnotedb',
+  charset: 'utf8mb4',
+  waitForConnections: true,
+  connectionLimit: 10,
+};
 
-export const db = new Database(path.resolve(dbPath));
+let pool: Pool;
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+export async function initDb(): Promise<void> {
+  pool = createPool(MYSQL_CONFIG);
+  const conn = await pool.getConnection();
+  conn.release();
+  console.log(`[db] MySQL connected to ${MYSQL_CONFIG.database}@${MYSQL_CONFIG.host}`);
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    email      TEXT UNIQUE,
-    phone      TEXT UNIQUE,
-    password   TEXT,
-    nickname   TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
-  );
+export function getPool(): Pool {
+  return pool;
+}
 
-  CREATE TABLE IF NOT EXISTS verification_codes (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    target     TEXT NOT NULL,
-    code       TEXT NOT NULL,
-    type       TEXT NOT NULL CHECK(type IN ('email','phone')),
-    purpose    TEXT NOT NULL CHECK(purpose IN ('register','login')),
-    used       INTEGER NOT NULL DEFAULT 0,
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
-  );
+type ParamType = string | number | boolean | null | Buffer | Date;
 
-  CREATE INDEX IF NOT EXISTS idx_codes_target ON verification_codes(target, expires_at);
+export async function dbAll<T = Record<string, unknown>>(sql: string, params: ParamType[] = []): Promise<T[]> {
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  return rows as T[];
+}
 
-  CREATE TABLE IF NOT EXISTS login_logs (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER,
-    target     TEXT NOT NULL,
-    method     TEXT NOT NULL CHECK(method IN ('password','email_code','phone_code')),
-    ip         TEXT,
-    user_agent TEXT,
-    success    INTEGER NOT NULL DEFAULT 0,
-    fail_reason TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-  );
+export async function dbGet<T = Record<string, unknown>>(sql: string, params: ParamType[] = []): Promise<T | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+  const arr = rows as T[];
+  return arr.length > 0 ? arr[0] : null;
+}
 
-  CREATE INDEX IF NOT EXISTS idx_logs_user ON login_logs(user_id);
-  CREATE INDEX IF NOT EXISTS idx_logs_created ON login_logs(created_at DESC);
-
-  CREATE TABLE IF NOT EXISTS sheets (
-    id            TEXT PRIMARY KEY,
-    user_id       INTEGER NOT NULL,
-    title         TEXT NOT NULL DEFAULT '',
-    content       TEXT NOT NULL DEFAULT '',
-    type          TEXT NOT NULL DEFAULT 'plain' CHECK(type IN ('plain','markdown','code')),
-    language      TEXT,
-    group_id      TEXT,
-    pinned        INTEGER NOT NULL DEFAULT 0,
-    word_count    INTEGER NOT NULL DEFAULT 0,
-    chinese_count INTEGER NOT NULL DEFAULT 0,
-    english_count INTEGER NOT NULL DEFAULT 0,
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS note_groups (
-    id         TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL,
-    name       TEXT NOT NULL,
-    icon       TEXT,
-    color      TEXT,
-    parent_id  TEXT,
-    "order"    INTEGER NOT NULL DEFAULT 0,
-    collapsed  INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS sheet_versions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    sheet_id   TEXT NOT NULL,
-    user_id    INTEGER NOT NULL,
-    title      TEXT NOT NULL DEFAULT '',
-    content    TEXT NOT NULL DEFAULT '',
-    type       TEXT NOT NULL DEFAULT 'plain',
-    language   TEXT,
-    group_id   TEXT,
-    word_count INTEGER NOT NULL DEFAULT 0,
-    chinese_count INTEGER NOT NULL DEFAULT 0,
-    english_count INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_sheets_user ON sheets(user_id, updated_at);
-  CREATE INDEX IF NOT EXISTS idx_groups_user ON note_groups(user_id);
-  CREATE INDEX IF NOT EXISTS idx_versions_sheet ON sheet_versions(sheet_id, created_at DESC);
-`);
-
-// Migrate: add device_info column if not exists
-try {
-  db.exec(`ALTER TABLE login_logs ADD COLUMN device_info TEXT`);
-} catch {
-  // column already exists — ignore
+export async function dbRun(sql: string, params: ParamType[] = []): Promise<{ insertId?: number; affectedRows: number }> {
+  const [result] = await pool.execute<ResultSetHeader>(sql, params);
+  return { insertId: result.insertId, affectedRows: result.affectedRows };
 }
 
 export type User = {
@@ -121,7 +55,7 @@ export type LoginLog = {
   id: number;
   user_id: number | null;
   target: string;
-  method: 'password' | 'email_code' | 'phone_code';
+  method: string;
   ip: string | null;
   user_agent: string | null;
   success: number;
