@@ -9,10 +9,11 @@ import {
   Trash2,
   FileText,
   AlertCircle,
-  FileCode,
   FileType,
   File,
 } from 'lucide-react';
+import { CodeEditor } from './CodeEditor';
+import { LanguageIcon } from '../utils/languageUtils';
 
 export function Editor() {
   const {
@@ -88,7 +89,7 @@ export function Editor() {
   const typeIcon = useMemo(() => {
     if (!sheet) return null;
     switch (sheet.type) {
-      case 'code': return <FileCode size={14} />;
+      case 'code': return <LanguageIcon language={sheet.language} size={16} />;
       case 'markdown': return <FileType size={14} />;
       default: return <File size={14} />;
     }
@@ -125,10 +126,14 @@ export function Editor() {
           <span className="toolbar-type-badge">
             {isCode ? sheet.language || '代码' : isMarkdown ? 'Markdown' : '纯文本'}
           </span>
-          <span className="toolbar-divider">|</span>
-          <span className="toolbar-wordcount">
-            {sheet.wordCount ?? 0} 字
-          </span>
+          {preferences.showWordCount && (
+            <>
+              <span className="toolbar-divider">|</span>
+              <span className="toolbar-wordcount">
+                {sheet.wordCount ?? 0} 字
+              </span>
+            </>
+          )}
           {preferences.focusMode && (
             <span className="focus-badge">
               <AlertCircle size={12} />
@@ -190,15 +195,25 @@ export function Editor() {
             }}
           />
         </div>
+      ) : isCode ? (
+        <div className="editor-content-code">
+          <CodeEditor
+            value={content}
+            onChange={handleContentChange}
+            language={sheet.language}
+            isDark={isDark}
+            fontSize={preferences.editorFontSize - 2}
+          />
+        </div>
       ) : (
-        <div className={`editor-content-plain ${isCode ? 'code-editor' : ''}`}>
+        <div className="editor-content-plain">
           <textarea
             ref={textareaRef}
             className="editor-textarea"
-            placeholder={isCode ? '// 在此编写代码...' : '开始写作...'}
+            placeholder="开始写作..."
             value={content}
             onChange={handleTextareaChange}
-            spellCheck={!isCode}
+            spellCheck
           />
         </div>
       )}

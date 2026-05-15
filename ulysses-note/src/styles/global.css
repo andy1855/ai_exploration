@@ -878,6 +878,10 @@ a {
   padding-right: 48px;
 }
 
+.editor-container.focus-mode .editor-content-code {
+  padding: 0 48px;
+}
+
 /* ========== Toolbar type badge ========== */
 .toolbar-left {
   display: flex;
@@ -921,7 +925,7 @@ a {
   background: var(--accent-light);
 }
 
-/* ========== Plain/Code Editor ========== */
+/* ========== Plain Editor ========== */
 .editor-content-plain {
   flex: 1;
   overflow: hidden;
@@ -950,16 +954,46 @@ a {
   color: var(--text-muted);
 }
 
-.editor-content-plain.code-editor .editor-textarea {
+/* ========== Code Editor (CodeMirror) ========== */
+.editor-content-code {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.editor-content-code .cm-editor {
+  flex: 1;
+  height: 100%;
+  background: transparent !important;
+  outline: none !important;
+}
+
+.editor-content-code .cm-scroller {
+  overflow: auto;
+}
+
+.editor-content-code .cm-focused {
+  outline: none !important;
+}
+
+.editor-content-code .ͼ1 .cm-scroller {
+  font-family: var(--font-mono) !important;
+}
+
+/* ========== Language Icon Badge ========== */
+.lang-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: calc(var(--editor-font-size) - 2px);
-  line-height: 1.6;
-  background: var(--bg-secondary);
-  padding: 20px;
-  tab-size: 4;
-  white-space: pre;
-  overflow-wrap: normal;
-  overflow-x: auto;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 /* ========== Create Sheet Modal ========== */
@@ -1078,6 +1112,226 @@ a {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-light);
+}
+
+/* ========== Settings Modal ========== */
+.settings-modal {
+  width: 520px;
+}
+
+.modal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-header-title svg {
+  color: var(--accent);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.settings-section {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.settings-section:last-of-type {
+  border-bottom: none;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-tertiary);
+  margin-bottom: 14px;
+}
+
+.settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.settings-item:last-child {
+  margin-bottom: 0;
+}
+
+.settings-item-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-item-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-item-label svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.settings-value-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+/* Theme options */
+.theme-options {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-option-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.theme-option-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
+}
+
+.theme-option-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Font size options */
+.font-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.font-size-btn {
+  width: 40px;
+  height: 32px;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.font-size-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.font-size-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Toggle switch */
+.toggle-btn {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.toggle-btn.on {
+  background: var(--accent);
+}
+
+.toggle-btn.off {
+  background: var(--bg-active);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: left 0.2s ease;
+}
+
+.toggle-btn.on .toggle-thumb {
+  left: 21px;
+}
+
+.toggle-btn.off .toggle-thumb {
+  left: 3px;
+}
+
+/* Settings action button */
+.settings-action-btn {
+  padding: 6px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.settings-action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* Settings footer */
+.settings-footer {
+  padding: 12px 24px 20px;
+  text-align: center;
+}
+
+.settings-footer span {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* ========== Animations ========== */

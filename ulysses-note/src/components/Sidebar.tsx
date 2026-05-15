@@ -3,7 +3,6 @@ import { useNoteStore } from '../store/useNoteStore';
 import {
   Folder,
   FileText,
-  FileCode,
   FileType,
   Plus,
   Trash2,
@@ -13,10 +12,12 @@ import {
   Sun,
   Moon,
   ListMusic,
-  Code,
   File,
+  Settings,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
+import { SettingsModal } from './SettingsModal';
+import { LanguageIcon } from '../utils/languageUtils';
 
 export function Sidebar() {
   const {
@@ -41,6 +42,7 @@ export function Sidebar() {
   const [editName, setEditName] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Get root groups and ungrouped sheets
   const rootGroups = getChildGroups(null);
@@ -91,6 +93,13 @@ export function Sidebar() {
             title={currentTheme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
           >
             {currentTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setShowSettings(true)}
+            title="设置"
+          >
+            <Settings size={16} />
           </button>
         </div>
       </div>
@@ -163,8 +172,11 @@ export function Sidebar() {
               className={`sheet-item ${selectedSheetId === sheet.id ? 'active' : ''}`}
               onClick={() => selectSheet(sheet.id)}
             >
-              <FileText size={14} className="sheet-icon" />
+              <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
               <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
+              {sheet.type === 'code' && sheet.language && (
+                <span className="sheet-lang-badge">{sheet.language}</span>
+              )}
               <button
                 className="item-delete-btn"
                 onClick={(e) => {
@@ -194,6 +206,11 @@ export function Sidebar() {
           onClose={() => setShowCreateModal(false)}
         />
       )}
+
+      {/* Settings modal */}
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} />
+      )}
     </aside>
   );
 }
@@ -217,7 +234,7 @@ interface GroupItemProps {
 }
 
 function getSheetIcon(type?: string, language?: string | null) {
-  if (type === 'code') return <Code size={14} />;
+  if (type === 'code') return <LanguageIcon language={language} size={14} />;
   if (type === 'markdown') return <FileType size={14} />;
   return <File size={14} />;
 }
@@ -343,7 +360,7 @@ function GroupItem({
               style={{ paddingLeft: 12 + (level + 1) * 16 }}
               onClick={() => onSelectSheet(sheet.id)}
             >
-              {getSheetIcon(sheet.type, sheet.language)}
+              <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
               <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
               {sheet.type === 'code' && sheet.language && (
                 <span className="sheet-lang-badge">{sheet.language}</span>
