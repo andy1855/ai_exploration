@@ -113,7 +113,7 @@ function App() {
           <button className="icon-btn" onClick={toggleSidebar} title={preferences.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}>
             {preferences.sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
           </button>
-          <span className="topbar-brand">Lemon Note</span>
+          <span className="topbar-brand"><LemonLogo size={20} /> Lemon Note</span>
         </div>
         <div className="topbar-right">
           <button className="icon-btn" onClick={toggleTheme} title={isDark ? '切换亮色' : '切换暗色'}>

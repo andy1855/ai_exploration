@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import MDEditor from '@uiw/react-md-editor';
+import { LemonLogo } from './LemonLogo';
 import { useNoteStore } from '../store/useNoteStore';
 import type { EditorViewMode } from '../types';
 import {
@@ -426,7 +427,7 @@ export function Editor() {
     return (
       <div className="editor-empty">
         <div className="empty-icon">
-          <FileText size={48} />
+          <LemonLogo size={56} />
         </div>
         <h2>Lemon Note</h2>
         <p>选择一个文稿开始编辑，或创建一个新文稿</p>

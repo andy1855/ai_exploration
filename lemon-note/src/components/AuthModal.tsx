@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { ListMusic, Mail, Lock, Hash, Eye, EyeOff, Send, LogIn, UserPlus, Clock, Shield } from 'lucide-react';
+import { LemonLogo } from './LemonLogo';
+import { Mail, Lock, Hash, Eye, EyeOff, Send, LogIn, UserPlus, Clock, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../api/auth';
 import type { LoginLog } from '../api/auth';
@@ -112,7 +113,7 @@ export function AuthPage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <ListMusic size={28} />
+          <LemonLogo size={28} />
           <span>Lemon Note</span>
         </div>
 
