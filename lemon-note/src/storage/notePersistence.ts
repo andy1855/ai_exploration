@@ -198,15 +198,16 @@ let syncToken: ReturnType<typeof setTimeout> | null = null;
  * 从服务器拉取笔记数据，覆盖本地 localStorage。
  * 返回 true 表示成功从服务器加载了数据。
  */
-export async function tryPullFromServer(): Promise<boolean> {
+/**
+ * 从服务器拉取笔记数据（不写入 localStorage）。
+ */
+async function fetchFromServer(): Promise<{ sheets: Sheet[]; groups: Group[] } | null> {
   try {
     const data = await notesApi.fetchAll();
-    if (!Array.isArray(data.sheets)) return false;
-    // 写入 localStorage 作为缓存
-    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify({ sheets: data.sheets, groups: data.groups }));
-    return true;
+    if (!Array.isArray(data.sheets)) return null;
+    return { sheets: data.sheets, groups: data.groups ?? [] };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -222,25 +223,33 @@ async function pushToServer(sheets: Sheet[], groups: Group[]) {
 }
 
 /**
- * 启动时执行一次数据同步：
- * 1. 先尝试从服务器拉取 → 如果有数据，使用服务器数据
- * 2. 如果服务器无数据但本地有 → 推送到服务器
- * 3. 如果都无数据 → 无操作
+ * 启动时执行一次数据同步，决定用什么数据：
  *
- * 返回最终的数据给 caller。
+ * ┌──────────┬──────────┬──────────────┐
+ * │  服务器   │  本地    │  结果         │
+ * ├──────────┼──────────┼──────────────┤
+ * │ 有数据    │ 忽略     │ 用服务器数据   │
+ * │ 空        │ 有数据   │ 推送本地→服务器│
+ * │ 空        │ 空       │ 空           │
+ * └──────────┴──────────┴──────────────┘
+ *
+ * 服务器是权威源（Source of Truth）。
  */
 export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] } | null> {
-  // 先从服务器拉取
-  const pulled = await tryPullFromServer();
-  if (pulled) {
-    // 服务器有数据 → 读取 localStorage（已在 tryPullFromServer 中写入）
-    const local = loadNotesFromLocalStorage();
-    if (local.sheets.length > 0) return local;
+  // 1) 先读本地数据（不要提前覆盖）
+  const local = loadNotesFromLocalStorage();
+
+  // 2) 拉取服务器数据
+  const server = await fetchFromServer();
+
+  if (server && server.sheets.length > 0) {
+    // 服务器有数据 → 写入 localStorage 作为缓存，使用服务器数据
+    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(server));
+    return server;
   }
 
-  // 服务器无数据 → 检查本地是否有数据需要上传
-  const local = loadNotesFromLocalStorage();
   if (local.sheets.length > 0) {
+    // 服务器无数据，本地有 → 推送到服务器
     await pushToServer(local.sheets, local.groups);
     return local;
   }
