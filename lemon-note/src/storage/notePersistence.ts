@@ -1,6 +1,8 @@
 import type { Sheet, Group } from '../types';
 
 export const NOTES_STORAGE_KEY = 'lemon-note-data';
+const ULYSSES_STORAGE_KEY = 'ulysses-note-data';
+const MIGRATED_KEY = 'lemon-note-migrated-from-ulysses';
 const DATA_FILE = 'lemon-note-data.json';
 const IDB_NAME = 'lemon-note-fs';
 const IDB_STORE = 'handles';
@@ -56,11 +58,15 @@ async function idbRemoveDirHandle() {
 }
 
 export async function initNotePersistence(): Promise<void> {
+  directoryHandle = null;
+  // File System Access API 仅在安全上下文可用；HTTP 部署下不必打开 IDB，避免拖慢首屏。
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    return;
+  }
   try {
     directoryHandle = await idbGetDirHandle();
-    if (directoryHandle && (await directoryHandle.requestPermission({ mode: 'readwrite' })) !== 'granted') {
-      directoryHandle = null;
-    }
+    // 不在启动时调用 requestPermission（可能长时间阻塞或在不支持的上下文中异常），
+    // 读写失败时在 tryHydrateFromDisk / persistNotes 中回退到 localStorage。
   } catch {
     directoryHandle = null;
   }
@@ -110,11 +116,37 @@ export async function persistNotes(sheets: Sheet[], groups: Group[]): Promise<vo
   }
 }
 
+/**
+ * 从 ulysses-note 的 localStorage 数据一次性迁移到 lemon-note。
+ * 仅在 lemon-note 无数据且 ulysses-note 有数据时执行。
+ */
+function tryMigrateFromUlysses(): { sheets: Sheet[]; groups: Group[] } | null {
+  try {
+    if (localStorage.getItem(MIGRATED_KEY)) return null;
+    const raw = localStorage.getItem(ULYSSES_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.sheets)) return null;
+    // 标记已迁移，避免重复执行
+    localStorage.setItem(MIGRATED_KEY, '1');
+    // 将 ulysses 数据写入 lemon-note 的 key
+    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify({ sheets: data.sheets, groups: data.groups ?? [] }));
+    console.log('[migrate] ulysses-note 笔记已迁移到 lemon-note');
+    return { sheets: data.sheets, groups: data.groups ?? [] };
+  } catch (e) {
+    console.warn('[migrate] ulysses-note 数据迁移失败', e);
+    return null;
+  }
+}
+
 export function loadNotesFromLocalStorage(): { sheets: Sheet[]; groups: Group[] } {
   try {
     const raw = localStorage.getItem(NOTES_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch {}
+  // 无 lemon-note 数据 → 尝试从 ulysses-note 迁移
+  const migrated = tryMigrateFromUlysses();
+  if (migrated) return migrated;
   return { sheets: [], groups: [] };
 }
 

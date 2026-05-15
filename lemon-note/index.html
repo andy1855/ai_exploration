@@ -8,6 +8,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      #root:empty {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        color: #6b7280;
+      }
+      #root:empty::before {
+        content: '加载中…';
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
