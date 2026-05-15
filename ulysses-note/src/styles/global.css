@@ -2535,7 +2535,15 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.4;
-  margin-top: 1px;
+  margin-top: 2px;
+  max-width: 100%;
+}
+
+.sheet-snippet .search-highlight {
+  background: rgba(250, 204, 21, 0.5);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 .sheet-item.has-snippet {

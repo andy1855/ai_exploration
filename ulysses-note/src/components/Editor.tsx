@@ -171,6 +171,16 @@ export function Editor() {
     setShowDeleteConfirm(true);
   };
 
+  // Live word count from current content (no save needed)
+  const liveWordCount = useMemo(() => {
+    const cleaned = content.replace(/[#*`~\[\]()>|\\]/g, '').trim();
+    if (!cleaned) return { chinese: 0, english: 0 };
+    const chinese = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const withoutChinese = cleaned.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
+    const english = withoutChinese.split(/\s+/).filter((w: string) => /[a-zA-Z0-9]/.test(w)).length;
+    return { chinese, english };
+  }, [content]);
+
   const typeIcon = useMemo(() => {
     if (!sheet) return null;
     switch (sheet.type) {
@@ -200,8 +210,8 @@ export function Editor() {
 
   const isDark = preferences.theme === 'dark';
   const showFormattingBar = isMarkdown && !preferences.formattingBarCollapsed;
-  const chineseCount = sheet.chineseCount ?? 0;
-  const englishCount = sheet.englishCount ?? 0;
+  const chineseCount = liveWordCount.chinese;
+  const englishCount = liveWordCount.english;
 
   return (
     <div

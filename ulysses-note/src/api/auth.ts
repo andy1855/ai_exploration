@@ -30,7 +30,7 @@ export const authApi = {
     api.post<AuthUser>('/auth/login', data),
 
   getLogs: (page = 1) =>
-    api.get<{ logs: LoginLog[]; total: number }>(`/auth/logs?page=${page}`),
+    api.get<{ logs: LoginLog[]; total: number }>(`/logs?page=${page}`),
 
   updateProfile: (nickname: string) =>
     api.put<{ nickname: string }>('/auth/profile', { nickname }),

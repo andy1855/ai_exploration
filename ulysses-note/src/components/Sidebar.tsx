@@ -44,10 +44,11 @@ function getContentSnippet(content: string, query: string): string {
   const lower = content.toLowerCase();
   const idx = lower.indexOf(query.toLowerCase());
   if (idx === -1) return '';
-  const start = Math.max(0, idx - 20);
-  const end = Math.min(content.length, idx + query.length + 40);
+  // Start close to the match so it's visible in the narrow snippet area
+  const start = Math.max(0, idx - 6);
+  const end = Math.min(content.length, idx + query.length + 50);
   const snippet = (start > 0 ? '…' : '') + content.slice(start, end) + (end < content.length ? '…' : '');
-  return snippet.replace(/\n/g, ' ');
+  return snippet.replace(/[\n\r]+/g, ' ');
 }
 
 // ─── MoveToModal ─────────────────────────────────────────────
