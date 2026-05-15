@@ -694,7 +694,7 @@ interface GroupItemProps {
 
 function getSheetIcon(type?: string, language?: string | null) {
   if (type === 'code') return <LanguageIcon language={language} size={14} />;
-  if (type === 'markdown') return <MarkdownMIcon />;
+  if (type === 'markdown') return <MarkdownMIcon size={14} />;
   return <File size={14} />;
 }
 

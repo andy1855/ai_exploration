@@ -51,7 +51,7 @@ export function CreateSheetModal({ groupId, onClose }: Props) {
               </button>
 
               <button className="type-card" onClick={() => handleTypeSelect('markdown')}>
-                <MarkdownMIcon size={18} />
+                <MarkdownMIcon size={28} />
                 <span className="type-card-title">MD 文稿</span>
                 <span className="type-card-desc">Markdown 格式，.md 后缀，支持实时预览</span>
               </button>
