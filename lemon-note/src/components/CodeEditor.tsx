@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { EditorView, Decoration, DecorationSet, StateEffect, StateField } from '@codemirror/view';
+import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
+import { StateEffect, StateField } from '@codemirror/state';
 import { getLanguageExtension } from '../utils/languageUtils';
 import { escapeRegExp } from '../utils/searchUtils';
 
