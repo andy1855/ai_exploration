@@ -25,14 +25,14 @@ jobs:
 
             # ── Frontend ──────────────────────────────────────
             cd ulysses-note
-            npm ci
+            npm install
             npm run build
             mkdir -p /var/www/ulysses-note
             cp -r dist/. /var/www/ulysses-note/
 
             # ── Backend ───────────────────────────────────────
             cd server
-            npm ci
+            npm install
             npm run build
 
             if ! command -v pm2 &>/dev/null; then
