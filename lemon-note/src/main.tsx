@@ -1,11 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { initNotePersistence, tryHydrateFromDisk } from './storage/notePersistence';
+import { initNotePersistence, tryHydrateFromDisk, initialSync } from './storage/notePersistence';
 import { useNoteStore } from './store/useNoteStore';
 
 async function boot() {
   await initNotePersistence();
+
+  // 1) 优先从本地目录加载（File System API）
   const fromDisk = await tryHydrateFromDisk();
   if (fromDisk) {
     useNoteStore.setState({
@@ -13,6 +15,16 @@ async function boot() {
       groups: fromDisk.groups,
       selectedSheetId: fromDisk.sheets[0]?.id ?? null,
     });
+  } else {
+    // 2) 无本地目录 → 尝试服务端同步（会回退到 localStorage）
+    const synced = await initialSync();
+    if (synced) {
+      useNoteStore.setState({
+        sheets: synced.sheets,
+        groups: synced.groups,
+        selectedSheetId: synced.sheets[0]?.id ?? null,
+      });
+    }
   }
 
   const el = document.getElementById('root');

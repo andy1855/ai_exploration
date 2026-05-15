@@ -1,4 +1,5 @@
 import type { Sheet, Group } from '../types';
+import { notesApi } from '../api/notes';
 
 export const NOTES_STORAGE_KEY = 'lemon-note-data';
 const ULYSSES_STORAGE_KEY = 'ulysses-note-data';
@@ -187,4 +188,77 @@ export async function flushCurrentNotesToDisk(
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : '保存失败' };
   }
+}
+
+// ─── 服务端同步 ─────────────────────────────────────────
+
+let syncToken: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 从服务器拉取笔记数据，覆盖本地 localStorage。
+ * 返回 true 表示成功从服务器加载了数据。
+ */
+export async function tryPullFromServer(): Promise<boolean> {
+  try {
+    const data = await notesApi.fetchAll();
+    if (!Array.isArray(data.sheets)) return false;
+    // 写入 localStorage 作为缓存
+    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify({ sheets: data.sheets, groups: data.groups }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 将本地数据推送到服务器（全量覆盖）。
+ */
+async function pushToServer(sheets: Sheet[], groups: Group[]) {
+  try {
+    await notesApi.syncAll({ sheets, groups });
+  } catch (e) {
+    console.warn('[sync] 推送失败', e);
+  }
+}
+
+/**
+ * 启动时执行一次数据同步：
+ * 1. 先尝试从服务器拉取 → 如果有数据，使用服务器数据
+ * 2. 如果服务器无数据但本地有 → 推送到服务器
+ * 3. 如果都无数据 → 无操作
+ *
+ * 返回最终的数据给 caller。
+ */
+export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] } | null> {
+  // 先从服务器拉取
+  const pulled = await tryPullFromServer();
+  if (pulled) {
+    // 服务器有数据 → 读取 localStorage（已在 tryPullFromServer 中写入）
+    const local = loadNotesFromLocalStorage();
+    if (local.sheets.length > 0) return local;
+  }
+
+  // 服务器无数据 → 检查本地是否有数据需要上传
+  const local = loadNotesFromLocalStorage();
+  if (local.sheets.length > 0) {
+    await pushToServer(local.sheets, local.groups);
+    return local;
+  }
+
+  return null;
+}
+
+/**
+ * 笔记变更后调用：保存到 localStorage 并调度推送到服务器（防抖 2s）。
+ */
+export function onChangeSync(sheets: Sheet[], groups: Group[]) {
+  // 保存到 localStorage
+  persistNotes(sheets, groups);
+
+  // 调度服务器推送（防抖）
+  if (syncToken) clearTimeout(syncToken);
+  syncToken = setTimeout(() => {
+    syncToken = null;
+    void pushToServer(sheets, groups);
+  }, 2000);
 }

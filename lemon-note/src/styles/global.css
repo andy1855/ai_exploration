@@ -2429,6 +2429,12 @@ a {
   margin-top: 2px;
 }
 
+.log-device {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
 .logs-pager {
   display: flex;
   align-items: center;

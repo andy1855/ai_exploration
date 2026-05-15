@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode } from '../types';
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
-import { persistNotes, loadNotesFromLocalStorage } from '../storage/notePersistence';
+import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
 
 const PREFS_KEY = 'lemon-note-preferences';
 
@@ -12,7 +12,7 @@ function loadData(): { sheets: Sheet[]; groups: Group[] } {
 }
 
 function saveData(sheets: Sheet[], groups: Group[]) {
-  void persistNotes(sheets, groups);
+  onChangeSync(sheets, groups);
 }
 
 function loadPreferences(): AppPreferences {

@@ -318,6 +318,12 @@ export function LoginLogsPanel({ onClose }: LogsPanelProps) {
                 <span>{log.ip ?? '—'}</span>
                 <span>{new Date(log.created_at * 1000).toLocaleString('zh-CN')}</span>
               </div>
+              {log.device_info && (() => {
+                try {
+                  const d = JSON.parse(log.device_info);
+                  return <div className="log-device">{d.browser} · {d.os}</div>;
+                } catch { return null; }
+              })()}
               {log.fail_reason && <div className="log-fail-reason">{log.fail_reason}</div>}
             </div>
           ))}

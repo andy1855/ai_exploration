@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import authRouter from './routes/auth';
 import logsRouter from './routes/logs';
+import notesRouter from './routes/notes';
 
 // Initialize database on import
 import './database';
@@ -18,6 +19,7 @@ app.use(express.json());
 
 app.use('/api/auth', authRouter);
 app.use('/api/logs', logsRouter);
+app.use('/api/notes', notesRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, ts: Date.now() });

@@ -1,4 +1,5 @@
 import { api } from './client';
+import { getDeviceInfo } from '../utils/deviceInfo';
 
 export interface AuthUser {
   userId: number;
@@ -14,6 +15,8 @@ export interface LoginLog {
   target: string;
   method: string;
   ip: string | null;
+  user_agent?: string | null;
+  device_info?: string | null;
   success: number;
   fail_reason: string | null;
   created_at: number;
@@ -27,7 +30,7 @@ export const authApi = {
     api.post<AuthUser>('/auth/register', data),
 
   login: (data: { target: string; method: string; code?: string; password?: string; rememberMe?: boolean }) =>
-    api.post<AuthUser>('/auth/login', data),
+    api.post<AuthUser>('/auth/login', { ...data, deviceInfo: getDeviceInfo() }),
 
   getLogs: (page = 1) =>
     api.get<{ logs: LoginLog[]; total: number }>(`/logs?page=${page}`),

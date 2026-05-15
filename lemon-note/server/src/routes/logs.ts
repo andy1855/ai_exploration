@@ -11,7 +11,7 @@ router.get('/', authenticate, (req: Request, res: Response): void => {
   const offset = (page - 1) * limit;
 
   const logs = db.prepare(`
-    SELECT id, target, method, ip, user_agent, success, fail_reason, created_at
+    SELECT id, target, method, ip, user_agent, device_info, success, fail_reason, created_at
     FROM login_logs
     WHERE user_id = ?
     ORDER BY created_at DESC

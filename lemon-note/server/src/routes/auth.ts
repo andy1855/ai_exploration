@@ -36,19 +36,38 @@ function recordLog(params: {
   req: Request;
   success: boolean;
   failReason?: string;
+  deviceInfo?: string;
 }) {
-  db.prepare(`
-    INSERT INTO login_logs (user_id, target, method, ip, user_agent, success, fail_reason)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    params.userId,
-    params.target,
-    params.method,
-    getIp(params.req),
-    params.req.headers['user-agent'] ?? '',
-    params.success ? 1 : 0,
-    params.failReason ?? null
-  );
+  const stmt = db.prepare(`
+    INSERT INTO login_logs (user_id, target, method, ip, user_agent, device_info, success, fail_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  try {
+    stmt.run(
+      params.userId,
+      params.target,
+      params.method,
+      getIp(params.req),
+      params.req.headers['user-agent'] ?? '',
+      params.deviceInfo ?? null,
+      params.success ? 1 : 0,
+      params.failReason ?? null
+    );
+  } catch {
+    // fallback for databases without device_info column
+    db.prepare(`
+      INSERT INTO login_logs (user_id, target, method, ip, user_agent, success, fail_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      params.userId,
+      params.target,
+      params.method,
+      getIp(params.req),
+      params.req.headers['user-agent'] ?? '',
+      params.success ? 1 : 0,
+      params.failReason ?? null
+    );
+  }
 }
 
 // POST /api/auth/send-code
@@ -147,12 +166,13 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 
 // POST /api/auth/login
 router.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const { target, method, code, password, rememberMe } = req.body as {
+  const { target, method, code, password, rememberMe, deviceInfo } = req.body as {
     target: string;
     method: 'password' | 'email_code';
     code?: string;
     password?: string;
     rememberMe?: boolean;
+    deviceInfo?: string;
   };
 
   if (!target || !method) { res.status(400).json({ error: '参数缺失' }); return; }
@@ -203,7 +223,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   const expiresIn = rememberMe ? '30d' : '24h';
   const expiresAt = Date.now() + (rememberMe ? 30 * 86400000 : 86400000);
   const token = jwt.sign({ userId: user.id, target }, JWT_SECRET, { expiresIn });
-  recordLog({ userId: user.id, target, method, req, success: true });
+  recordLog({ userId: user.id, target, method, req, success: true, deviceInfo });
 
   res.json({ ok: true, token, userId: user.id, target, nickname: user.nickname ?? '', expiresAt });
 });

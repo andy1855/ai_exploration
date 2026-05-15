@@ -49,7 +49,46 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_logs_user ON login_logs(user_id);
   CREATE INDEX IF NOT EXISTS idx_logs_created ON login_logs(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS sheets (
+    id            TEXT PRIMARY KEY,
+    user_id       INTEGER NOT NULL,
+    title         TEXT NOT NULL DEFAULT '',
+    content       TEXT NOT NULL DEFAULT '',
+    type          TEXT NOT NULL DEFAULT 'plain' CHECK(type IN ('plain','markdown','code')),
+    language      TEXT,
+    group_id      TEXT,
+    pinned        INTEGER NOT NULL DEFAULT 0,
+    word_count    INTEGER NOT NULL DEFAULT 0,
+    chinese_count INTEGER NOT NULL DEFAULT 0,
+    english_count INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS note_groups (
+    id         TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    icon       TEXT,
+    color      TEXT,
+    parent_id  TEXT,
+    "order"    INTEGER NOT NULL DEFAULT 0,
+    collapsed  INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sheets_user ON sheets(user_id, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_groups_user ON note_groups(user_id);
 `);
+
+// Migrate: add device_info column if not exists
+try {
+  db.exec(`ALTER TABLE login_logs ADD COLUMN device_info TEXT`);
+} catch {
+  // column already exists — ignore
+}
 
 export type User = {
   id: number;
