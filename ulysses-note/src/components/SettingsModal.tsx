@@ -8,6 +8,20 @@ interface Props {
 
 const FONT_SIZES = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 
+const FONT_FAMILIES: { value: string; label: string; preview: string }[] = [
+  { value: 'system', label: '系统默认', preview: 'system-ui, -apple-system, sans-serif' },
+  { value: 'serif', label: '衬线体', preview: 'Georgia, "Times New Roman", serif' },
+  { value: 'mono', label: '等宽体', preview: '"JetBrains Mono", "Fira Code", Consolas, monospace' },
+  { value: 'chinese', label: '中文优先', preview: '"PingFang SC", "Microsoft YaHei", system-ui, sans-serif' },
+];
+
+const CSS_FONT_MAP: Record<string, string> = {
+  system: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: '"JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace',
+  chinese: '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif',
+};
+
 export function SettingsModal({ onClose }: Props) {
   const { preferences, updatePreferences } = useNoteStore();
 
@@ -24,6 +38,11 @@ export function SettingsModal({ onClose }: Props) {
   const setFontSize = (size: number) => {
     updatePreferences({ editorFontSize: size });
     document.documentElement.style.setProperty('--editor-font-size', `${size}px`);
+  };
+
+  const setFontFamily = (value: string) => {
+    updatePreferences({ editorFontFamily: value });
+    document.documentElement.style.setProperty('--editor-font-family', CSS_FONT_MAP[value] ?? CSS_FONT_MAP.system);
   };
 
   return (
@@ -93,6 +112,25 @@ export function SettingsModal({ onClose }: Props) {
                     onClick={() => setFontSize(size)}
                   >
                     {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-item">
+              <div className="settings-item-label">
+                <Type size={15} />
+                <span>编辑器字体</span>
+              </div>
+              <div className="font-family-options">
+                {FONT_FAMILIES.map((f) => (
+                  <button
+                    key={f.value}
+                    className={`font-family-btn ${(preferences.editorFontFamily ?? 'system') === f.value ? 'active' : ''}`}
+                    style={{ fontFamily: f.preview }}
+                    onClick={() => setFontFamily(f.value)}
+                  >
+                    {f.label}
                   </button>
                 ))}
               </div>

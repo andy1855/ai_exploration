@@ -11,7 +11,7 @@ interface Props {
 type Section = 'main' | 'change-email' | 'change-password';
 
 export function AccountPanel({ onClose }: Props) {
-  const { userId, target, nickname, login } = useAuthStore();
+  const { userId, target, nickname, token, login } = useAuthStore();
   const [section, setSection] = useState<Section>('main');
 
   // Nickname
@@ -56,8 +56,7 @@ export function AccountPanel({ onClose }: Props) {
     try {
       const res = await authApi.updateProfile(nicknameValue.trim());
       // Update auth store
-      const token = localStorage.getItem('ulysses-token') ?? '';
-      login({ userId: userId!, target: target!, nickname: res.nickname, token });
+      login({ userId: userId!, target: target!, nickname: res.nickname, token: token! });
       setEditingNickname(false);
     } catch (e) {
       setNicknameError(e instanceof ApiError ? e.message : '保存失败');
@@ -91,8 +90,7 @@ export function AccountPanel({ onClose }: Props) {
     setEmailError('');
     try {
       await authApi.changeEmail(newEmail, emailCode);
-      const token = localStorage.getItem('ulysses-token') ?? '';
-      login({ userId: userId!, target: newEmail, nickname: nickname!, token });
+      login({ userId: userId!, target: newEmail, nickname: nickname!, token: token! });
       setSection('main');
     } catch (e) {
       setEmailError(e instanceof ApiError ? e.message : '更改失败');

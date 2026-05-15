@@ -1,5 +1,6 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { useNoteStore } from '../store/useNoteStore';
+import type { Sheet } from '../types';
 import {
   Folder,
   FileType,
@@ -20,6 +21,10 @@ import {
   FolderPlus,
   Copy,
   UserCog,
+  CheckSquare,
+  Square,
+  X,
+  MoveRight,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
 import { SettingsModal } from './SettingsModal';
@@ -28,12 +33,57 @@ import { AccountPanel } from './AccountPanel';
 import { LanguageIcon } from '../utils/languageUtils';
 import { useAuthStore } from '../store/useAuthStore';
 import { ContextMenu, useContextMenu } from './ContextMenu';
+import { ConfirmDialog } from './ConfirmDialog';
 
+// ─── MoveToModal ─────────────────────────────────────────────
+interface MoveToModalProps {
+  sheetIds: string[];
+  onClose: () => void;
+  onMoved?: () => void;
+}
+
+function MoveToModal({ sheetIds, onClose, onMoved }: MoveToModalProps) {
+  const { groups, moveSheets } = useNoteStore();
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="move-to-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="move-to-header">
+          <MoveRight size={14} />
+          <span>移动到分组</span>
+          <button className="icon-btn" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="move-to-list">
+          <button
+            className="move-to-item"
+            onClick={() => { moveSheets(sheetIds, null); onMoved?.(); onClose(); }}
+          >
+            <File size={13} />
+            <span>不分组</span>
+          </button>
+          {groups.map((g) => (
+            <button
+              key={g.id}
+              className="move-to-item"
+              onClick={() => { moveSheets(sheetIds, g.id); onMoved?.(); onClose(); }}
+            >
+              <Folder size={13} />
+              <span>{g.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Sidebar ─────────────────────────────────────────────
 export function Sidebar() {
   const {
     groups,
+    sheets,
     getChildGroups,
     getSheetsByGroup,
+    getFilteredSheets,
     selectedSheetId,
     selectedGroupId,
     searchQuery,
@@ -42,8 +92,10 @@ export function Sidebar() {
     selectGroup,
     createGroup,
     deleteSheet,
+    deleteSheets,
     deleteGroup,
     updateGroup,
+    copySheet,
     setSearchQuery,
     updatePreferences,
   } = useNoteStore();
@@ -57,34 +109,90 @@ export function Sidebar() {
   const [showAccount, setShowAccount] = useState(false);
   const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+
+  // Multi-select
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
+  const [moveToIds, setMoveToIds] = useState<string[] | null>(null);
+
+  // Single-sheet delete confirm
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+
+  // Drag & drop
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null | 'root'>(undefined as unknown as null);
+
+  const searchRef = useRef<HTMLInputElement>(null);
   const { nickname, target, logout } = useAuthStore();
   const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu();
 
-  // Get root groups and ungrouped sheets
   const rootGroups = getChildGroups(null);
   const ungroupedSheets = getSheetsByGroup(null);
+  const isSearching = !!searchQuery;
+  const filteredSheets = isSearching ? getFilteredSheets() : null;
+  const searchCount = filteredSheets?.length ?? 0;
+
+  // Cmd+F to focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e as unknown as globalThis.KeyboardEvent).metaKey || (e as unknown as globalThis.KeyboardEvent).ctrlKey) {
+        if ((e as unknown as globalThis.KeyboardEvent).key === 'f') {
+          (e as unknown as globalThis.KeyboardEvent).preventDefault();
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler as unknown as EventListener);
+    return () => window.removeEventListener('keydown', handler as unknown as EventListener);
+  }, []);
 
   const openCreateModal = (groupId?: string) => {
     setCreateInGroupId(groupId);
     setShowCreateModal(true);
   };
 
+  function toggleSelect(id: string, e: React.MouseEvent) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+      });
+    } else if (selectedIds.size > 0) {
+      // Already in selection mode: toggle this item
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+      });
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  // Context menu helpers
   const handleCtxGroup = (e: React.MouseEvent, groupId: string, groupName: string) => {
     openCtx(e, [
       { label: '新建文稿', icon: <FilePlus size={13} />, onClick: () => openCreateModal(groupId) },
       { label: '新建子分组', icon: <FolderPlus size={13} />, onClick: () => { useNoteStore.getState().createGroup('新建分组', groupId); } },
       { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setEditingGroupId(groupId); setEditName(groupName); } },
       { separator: true },
-      { label: '删除分组', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm(`删除分组"${groupName}"？分组内的文稿将移出分组。`)) deleteGroup(groupId); } },
+      { label: '删除分组', icon: <Trash2 size={13} />, danger: true, onClick: () => { setDeleteTarget({ id: `group:${groupId}`, title: groupName }); } },
     ]);
   };
 
   const handleCtxSheet = (e: React.MouseEvent, sheetId: string, sheetTitle: string) => {
     openCtx(e, [
       { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setRenamingSheetId(sheetId); setRenameValue(sheetTitle); } },
+      { label: '复制文稿', icon: <Copy size={13} />, onClick: () => copySheet(sheetId) },
+      { label: '移动到...', icon: <MoveRight size={13} />, onClick: () => setMoveToIds([sheetId]) },
       { label: '复制标题', icon: <Copy size={13} />, onClick: () => navigator.clipboard.writeText(sheetTitle) },
       { separator: true },
-      { label: '删除文稿', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm('确定删除此文稿？')) deleteSheet(sheetId); } },
+      { label: '删除文稿', icon: <Trash2 size={13} />, danger: true, onClick: () => setDeleteTarget({ id: sheetId, title: sheetTitle }) },
     ]);
   };
 
@@ -94,9 +202,7 @@ export function Sidebar() {
   };
 
   const handleGroupNameSubmit = (groupId: string) => {
-    if (editName.trim()) {
-      updateGroup(groupId, { name: editName.trim() });
-    }
+    if (editName.trim()) updateGroup(groupId, { name: editName.trim() });
     setEditingGroupId(null);
   };
 
@@ -111,6 +217,43 @@ export function Sidebar() {
     document.documentElement.setAttribute('data-theme', next);
   };
 
+  // Drag & drop handlers
+  const handleDragStart = (e: React.DragEvent, sheetId: string) => {
+    setDraggingId(sheetId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', sheetId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDragOverGroupId(undefined as unknown as null);
+  };
+
+  const handleGroupDragOver = (e: React.DragEvent, groupId: string | null) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverGroupId(groupId === null ? 'root' : groupId);
+  };
+
+  const handleGroupDrop = (e: React.DragEvent, groupId: string | null) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    if (id) useNoteStore.getState().moveSheet(id, groupId);
+    setDraggingId(null);
+    setDragOverGroupId(undefined as unknown as null);
+  };
+
+  // Confirm delete handler
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.id.startsWith('group:')) {
+      deleteGroup(deleteTarget.id.slice(6));
+    } else {
+      deleteSheet(deleteTarget.id);
+    }
+    setDeleteTarget(null);
+  };
+
   const currentTheme = preferences.theme;
 
   return (
@@ -122,11 +265,7 @@ export function Sidebar() {
           <span>Ulysses Note</span>
         </div>
         <div className="sidebar-header-actions">
-          <button
-            className="icon-btn"
-            onClick={toggleTheme}
-            title={currentTheme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
-          >
+          <button className="icon-btn" onClick={toggleTheme} title={currentTheme === 'dark' ? '切换亮色' : '切换暗色'}>
             {currentTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           <button className="icon-btn" onClick={() => setShowSettings(true)} title="设置">
@@ -158,155 +297,366 @@ export function Sidebar() {
       <div className="sidebar-search">
         <Search size={14} className="search-icon" />
         <input
+          ref={searchRef}
           type="text"
-          placeholder="搜索文稿..."
+          placeholder="搜索文稿… (⌘F)"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="search-input"
         />
+        {searchQuery && (
+          <button className="search-clear-btn" onClick={() => setSearchQuery('')}><X size={12} /></button>
+        )}
       </div>
+      {isSearching && (
+        <div className="search-result-count">
+          找到 {searchCount} 篇文稿
+        </div>
+      )}
+
+      {/* Batch actions bar */}
+      {selectedIds.size > 0 && (
+        <div className="batch-actions-bar">
+          <span className="batch-count">已选 {selectedIds.size} 篇</span>
+          <button className="batch-btn" onClick={() => setMoveToIds(Array.from(selectedIds))} title="移动到">
+            <MoveRight size={13} />
+          </button>
+          <button className="batch-btn danger" onClick={() => setBatchDeleteConfirm(true)} title="批量删除">
+            <Trash2 size={13} />
+          </button>
+          <button className="batch-btn" onClick={clearSelection} title="取消选择">
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Quick actions */}
-      <div className="sidebar-actions">
-        <button className="action-btn" onClick={() => openCreateModal()}>
-          <Plus size={14} />
-          <span>新建文稿</span>
-        </button>
-        <button className="action-btn" onClick={() => createGroup('新建分组', null)}>
-          <Folder size={14} />
-          <span>新建分组</span>
-        </button>
-      </div>
-
-      {/* Group list */}
-      <div className="sidebar-groups">
-        {/* Root groups */}
-        {rootGroups.map((group) => (
-          <GroupItem
-            key={group.id}
-            group={group}
-            level={0}
-            selectedGroupId={selectedGroupId}
-            selectedSheetId={selectedSheetId}
-            isEditing={editingGroupId === group.id}
-            editName={editName}
-            onSelectGroup={() => selectGroup(group.id)}
-            onSelectSheet={selectSheet}
-            onCreateSheetInGroup={(gid) => openCreateModal(gid)}
-            onDeleteGroup={() => {
-              if (confirm(`删除分组"${group.name}"？分组内的文稿将移出分组。`)) {
-                deleteGroup(group.id);
-              }
-            }}
-            onDeleteSheet={(sheetId) => {
-              if (confirm('确定删除此文稿？')) deleteSheet(sheetId);
-            }}
-            onStartEdit={() => handleGroupDoubleClick(group)}
-            onEditNameChange={setEditName}
-            onSubmitEdit={() => handleGroupNameSubmit(group.id)}
-            onKeyDown={(e) => handleGroupNameKeyDown(e, group.id)}
-            onContextMenuGroup={handleCtxGroup}
-            onContextMenuSheet={handleCtxSheet}
-          />
-        ))}
-
-        {/* Ungrouped sheets */}
-        {ungroupedSheets.length > 0 && rootGroups.length > 0 && (
-          <div className="group-divider" />
-        )}
-        <div className="ungrouped-section">
-          {ungroupedSheets.length > 0 && rootGroups.length === 0 && (
-            <div className="group-label">文稿</div>
-          )}
-          {ungroupedSheets.map((sheet) => (
-            <div
-              key={sheet.id}
-              className={`sheet-item ${selectedSheetId === sheet.id ? 'active' : ''}`}
-              onClick={() => selectSheet(sheet.id)}
-              onContextMenu={(e) => openCtx(e, [
-                { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setRenamingSheetId(sheet.id); setRenameValue(sheet.title); } },
-                { label: '复制标题', icon: <Copy size={13} />, onClick: () => navigator.clipboard.writeText(sheet.title) },
-                { separator: true },
-                { label: '删除文稿', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm('确定删除此文稿？')) deleteSheet(sheet.id); } },
-              ])}
-            >
-              <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
-              {renamingSheetId === sheet.id ? (
-                <input
-                  className="sheet-rename-input"
-                  value={renameValue}
-                  autoFocus
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => { if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() }); setRenamingSheetId(null); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() }); setRenamingSheetId(null); }
-                    if (e.key === 'Escape') setRenamingSheetId(null);
-                  }}
-                />
-              ) : (
-                <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
-              )}
-              <button
-                className="item-delete-btn"
-                onClick={(e) => { e.stopPropagation(); if (confirm('确定删除此文稿？')) deleteSheet(sheet.id); }}
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
+      {!isSearching && (
+        <div className="sidebar-actions">
+          <button className="action-btn" onClick={() => openCreateModal()}>
+            <Plus size={14} /><span>新建文稿</span>
+          </button>
+          <button className="action-btn" onClick={() => createGroup('新建分组', null)}>
+            <Folder size={14} /><span>新建分组</span>
+          </button>
         </div>
+      )}
 
-        {/* Empty state */}
-        {rootGroups.length === 0 && ungroupedSheets.length === 0 && (
-          <div className="sidebar-empty">
-            <p>还没有文稿</p>
-            <p className="sub">点击"新建文稿"开始写作</p>
+      {/* Search results */}
+      {isSearching ? (
+        <div className="sidebar-groups">
+          {filteredSheets!.map((sheet) => (
+            <SheetItem
+              key={sheet.id}
+              sheet={sheet}
+              isSelected={selectedSheetId === sheet.id}
+              isChecked={selectedIds.has(sheet.id)}
+              isDragging={draggingId === sheet.id}
+              renamingId={renamingSheetId}
+              renameValue={renameValue}
+              onSelect={(e) => {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                  toggleSelect(sheet.id, e);
+                } else {
+                  selectSheet(sheet.id);
+                }
+              }}
+              onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
+              onToggleCheck={() => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  next.has(sheet.id) ? next.delete(sheet.id) : next.add(sheet.id);
+                  return next;
+                });
+              }}
+              onRenameChange={setRenameValue}
+              onRenameSubmit={() => {
+                if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
+                setRenamingSheetId(null);
+              }}
+              onRenameCancel={() => setRenamingSheetId(null)}
+              onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
+              onDragStart={(e) => handleDragStart(e, sheet.id)}
+              onDragEnd={handleDragEnd}
+              paddingLeft={12}
+            />
+          ))}
+          {filteredSheets!.length === 0 && (
+            <div className="sidebar-empty"><p>未找到相关文稿</p></div>
+          )}
+        </div>
+      ) : (
+        <div className="sidebar-groups">
+          {/* Root groups */}
+          {rootGroups.map((group) => (
+            <GroupItem
+              key={group.id}
+              group={group}
+              level={0}
+              selectedSheetId={selectedSheetId}
+              selectedGroupId={selectedGroupId}
+              selectedIds={selectedIds}
+              draggingId={draggingId}
+              dragOverGroupId={dragOverGroupId}
+              isEditing={editingGroupId === group.id}
+              editName={editName}
+              renamingSheetId={renamingSheetId}
+              renameValue={renameValue}
+              onSelectGroup={() => selectGroup(group.id)}
+              onSelectSheet={selectSheet}
+              onToggleSelect={toggleSelect}
+              onToggleCheck={(id) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  next.has(id) ? next.delete(id) : next.add(id);
+                  return next;
+                });
+              }}
+              onCreateSheetInGroup={(gid) => openCreateModal(gid)}
+              onDeleteGroup={() => setDeleteTarget({ id: `group:${group.id}`, title: group.name })}
+              onDeleteSheet={(id, title) => setDeleteTarget({ id, title })}
+              onStartEdit={() => handleGroupDoubleClick(group)}
+              onEditNameChange={setEditName}
+              onSubmitEdit={() => handleGroupNameSubmit(group.id)}
+              onKeyDown={(e) => handleGroupNameKeyDown(e, group.id)}
+              onContextMenuGroup={handleCtxGroup}
+              onContextMenuSheet={handleCtxSheet}
+              onRenameSheet={(id, title) => { setRenamingSheetId(id); setRenameValue(title); }}
+              onRenameChange={setRenameValue}
+              onRenameSubmit={(id) => {
+                if (renameValue.trim()) useNoteStore.getState().updateSheet(id, { title: renameValue.trim() });
+                setRenamingSheetId(null);
+              }}
+              onRenameCancel={() => setRenamingSheetId(null)}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onGroupDragOver={handleGroupDragOver}
+              onGroupDrop={handleGroupDrop}
+            />
+          ))}
+
+          {/* Ungrouped sheets */}
+          {ungroupedSheets.length > 0 && rootGroups.length > 0 && <div className="group-divider" />}
+          <div
+            className={`ungrouped-section ${dragOverGroupId === 'root' ? 'drag-over' : ''}`}
+            onDragOver={(e) => handleGroupDragOver(e, null)}
+            onDrop={(e) => handleGroupDrop(e, null)}
+            onDragLeave={() => setDragOverGroupId(undefined as unknown as null)}
+          >
+            {ungroupedSheets.length > 0 && rootGroups.length === 0 && (
+              <div className="group-label">文稿</div>
+            )}
+            {ungroupedSheets.map((sheet) => (
+              <SheetItem
+                key={sheet.id}
+                sheet={sheet}
+                isSelected={selectedSheetId === sheet.id}
+                isChecked={selectedIds.has(sheet.id)}
+                isDragging={draggingId === sheet.id}
+                renamingId={renamingSheetId}
+                renameValue={renameValue}
+                onSelect={(e) => {
+                  if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                    toggleSelect(sheet.id, e);
+                  } else {
+                    selectSheet(sheet.id);
+                  }
+                }}
+                onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
+                onToggleCheck={() => {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    next.has(sheet.id) ? next.delete(sheet.id) : next.add(sheet.id);
+                    return next;
+                  });
+                }}
+                onRenameChange={setRenameValue}
+                onRenameSubmit={() => {
+                  if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
+                  setRenamingSheetId(null);
+                }}
+                onRenameCancel={() => setRenamingSheetId(null)}
+                onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
+                onDragStart={(e) => handleDragStart(e, sheet.id)}
+                onDragEnd={handleDragEnd}
+                paddingLeft={12}
+              />
+            ))}
           </div>
-        )}
-      </div>
 
-      {/* Create modal */}
+          {/* Empty state */}
+          {rootGroups.length === 0 && ungroupedSheets.length === 0 && (
+            <div className="sidebar-empty">
+              <p>还没有文稿</p>
+              <p className="sub">点击"新建文稿"开始写作</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modals */}
       {showCreateModal && (
-        <CreateSheetModal
-          groupId={createInGroupId}
-          onClose={() => setShowCreateModal(false)}
+        <CreateSheetModal groupId={createInGroupId} onClose={() => setShowCreateModal(false)} />
+      )}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
+      {showAccount && <AccountPanel onClose={() => setShowAccount(false)} />}
+      {moveToIds && (
+        <MoveToModal sheetIds={moveToIds} onClose={() => setMoveToIds(null)} onMoved={clearSelection} />
+      )}
+
+      {/* Delete confirm */}
+      {deleteTarget && (
+        <ConfirmDialog
+          title={deleteTarget.id.startsWith('group:') ? '删除分组' : '删除文稿'}
+          message={
+            deleteTarget.id.startsWith('group:')
+              ? `确定删除分组「${deleteTarget.title}」吗？分组内的文稿将移出分组。`
+              : `确定删除「${deleteTarget.title || '未命名文稿'}」吗？此操作不可恢复。`
+          }
+          confirmText="删除"
+          danger
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+      {batchDeleteConfirm && (
+        <ConfirmDialog
+          title="批量删除"
+          message={`确定删除选中的 ${selectedIds.size} 篇文稿吗？此操作不可恢复。`}
+          confirmText="全部删除"
+          danger
+          onConfirm={() => { deleteSheets(Array.from(selectedIds)); clearSelection(); setBatchDeleteConfirm(false); }}
+          onCancel={() => setBatchDeleteConfirm(false)}
         />
       )}
 
-      {/* Settings modal */}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-
-      {/* Login logs */}
-      {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
-
-      {/* Account panel */}
-      {showAccount && <AccountPanel onClose={() => setShowAccount(false)} />}
-
-      {/* Global context menu */}
       {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.items} onClose={closeCtx} />}
     </aside>
   );
 }
 
+// ─── SheetItem ────────────────────────────────────────────────
+interface SheetItemProps {
+  sheet: Sheet;
+  isSelected: boolean;
+  isChecked: boolean;
+  isDragging: boolean;
+  renamingId: string | null;
+  renameValue: string;
+  paddingLeft?: number;
+  onSelect: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onToggleCheck: () => void;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
+  onDelete: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+}
+
+function SheetItem({
+  sheet,
+  isSelected,
+  isChecked,
+  isDragging,
+  renamingId,
+  renameValue,
+  paddingLeft = 12,
+  onSelect,
+  onContextMenu,
+  onToggleCheck,
+  onRenameChange,
+  onRenameSubmit,
+  onRenameCancel,
+  onDelete,
+  onDragStart,
+  onDragEnd,
+}: SheetItemProps) {
+  const isRenaming = renamingId === sheet.id;
+
+  return (
+    <div
+      className={`sheet-item ${isSelected ? 'active' : ''} ${isChecked ? 'checked' : ''} ${isDragging ? 'dragging' : ''}`}
+      style={{ paddingLeft }}
+      draggable
+      onClick={onSelect}
+      onContextMenu={onContextMenu}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      <button
+        className="sheet-check-btn"
+        onClick={(e) => { e.stopPropagation(); onToggleCheck(); }}
+        title="选择"
+      >
+        {isChecked ? <CheckSquare size={13} /> : <Square size={13} />}
+      </button>
+      <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
+      {isRenaming ? (
+        <input
+          className="sheet-rename-input"
+          value={renameValue}
+          autoFocus
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onRenameChange(e.target.value)}
+          onBlur={onRenameSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onRenameSubmit();
+            if (e.key === 'Escape') onRenameCancel();
+          }}
+        />
+      ) : (
+        <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
+      )}
+      {sheet.type === 'code' && sheet.language && (
+        <span className="sheet-lang-badge">{sheet.language}</span>
+      )}
+      <button
+        className="item-delete-btn"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
+  );
+}
+
+// ─── GroupItem ────────────────────────────────────────────────
 interface GroupItemProps {
   group: { id: string; name: string; collapsed?: boolean };
   level: number;
   selectedGroupId: string | null;
   selectedSheetId: string | null;
+  selectedIds: Set<string>;
+  draggingId: string | null;
+  dragOverGroupId: string | null | undefined;
   isEditing: boolean;
   editName: string;
+  renamingSheetId: string | null;
+  renameValue: string;
   onSelectGroup: () => void;
   onSelectSheet: (id: string) => void;
+  onToggleSelect: (id: string, e: React.MouseEvent) => void;
+  onToggleCheck: (id: string) => void;
+  onCreateSheetInGroup: (groupId: string) => void;
   onDeleteGroup: () => void;
-  onDeleteSheet: (id: string) => void;
+  onDeleteSheet: (id: string, title: string) => void;
   onStartEdit: () => void;
   onEditNameChange: (name: string) => void;
   onSubmitEdit: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
-  onCreateSheetInGroup: (groupId: string) => void;
   onContextMenuGroup?: (e: React.MouseEvent, groupId: string, groupName: string) => void;
   onContextMenuSheet?: (e: React.MouseEvent, sheetId: string, sheetTitle: string) => void;
+  onRenameSheet: (id: string, title: string) => void;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: (id: string) => void;
+  onRenameCancel: () => void;
+  onDragStart: (e: React.DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  onGroupDragOver: (e: React.DragEvent, groupId: string | null) => void;
+  onGroupDrop: (e: React.DragEvent, groupId: string | null) => void;
 }
 
 function getSheetIcon(type?: string, language?: string | null) {
@@ -316,32 +666,24 @@ function getSheetIcon(type?: string, language?: string | null) {
 }
 
 function GroupItem({
-  group,
-  level,
-  selectedGroupId,
-  selectedSheetId,
-  isEditing,
-  editName,
-  onSelectGroup,
-  onSelectSheet,
-  onDeleteGroup,
-  onDeleteSheet,
-  onStartEdit,
-  onEditNameChange,
-  onSubmitEdit,
-  onKeyDown,
-  onCreateSheetInGroup,
-  onContextMenuGroup,
-  onContextMenuSheet,
+  group, level, selectedGroupId, selectedSheetId, selectedIds,
+  draggingId, dragOverGroupId, isEditing, editName,
+  renamingSheetId, renameValue,
+  onSelectGroup, onSelectSheet, onToggleSelect, onToggleCheck,
+  onCreateSheetInGroup, onDeleteGroup, onDeleteSheet,
+  onStartEdit, onEditNameChange, onSubmitEdit, onKeyDown,
+  onContextMenuGroup, onContextMenuSheet,
+  onRenameSheet, onRenameChange, onRenameSubmit, onRenameCancel,
+  onDragStart, onDragEnd, onGroupDragOver, onGroupDrop,
 }: GroupItemProps) {
   const { getChildGroups, getSheetsByGroup, updateGroup } = useNoteStore();
   const [collapsed, setCollapsed] = useState(group.collapsed ?? false);
 
   const childGroups = getChildGroups(group.id);
   const childSheets = getSheetsByGroup(group.id);
-
   const isSelected = selectedGroupId === group.id;
   const hasChildren = childGroups.length > 0 || childSheets.length > 0;
+  const isDragOver = dragOverGroupId === group.id;
 
   const toggleCollapse = () => {
     const next = !collapsed;
@@ -349,34 +691,23 @@ function GroupItem({
     updateGroup(group.id, { collapsed: next });
   };
 
-  const handleGroupClick = () => {
-    if (hasChildren) toggleCollapse();
-    onSelectGroup();
-  };
-
   return (
     <div className="group-wrapper">
       <div
-        className={`group-item ${isSelected ? 'active' : ''}`}
+        className={`group-item ${isSelected ? 'active' : ''} ${isDragOver ? 'drag-over' : ''}`}
         style={{ paddingLeft: 12 + level * 16 }}
-        onClick={handleGroupClick}
+        onClick={() => { if (hasChildren) toggleCollapse(); onSelectGroup(); }}
         onContextMenu={(e) => onContextMenuGroup?.(e, group.id, group.name)}
+        onDragOver={(e) => onGroupDragOver(e, group.id)}
+        onDrop={(e) => onGroupDrop(e, group.id)}
+        onDragLeave={(e) => { e.stopPropagation(); }}
       >
-        <button
-          className="collapse-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleCollapse();
-          }}
-        >
-          {hasChildren ? (
-            collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />
-          ) : (
-            <span style={{ width: 12 }} />
-          )}
+        <button className="collapse-btn" onClick={(e) => { e.stopPropagation(); toggleCollapse(); }}>
+          {hasChildren
+            ? collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />
+            : <span style={{ width: 12 }} />}
         </button>
         <Folder size={16} className="group-icon" />
-
         {isEditing ? (
           <input
             className="group-edit-input"
@@ -388,11 +719,8 @@ function GroupItem({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="group-name" onDoubleClick={onStartEdit}>
-            {group.name}
-          </span>
+          <span className="group-name" onDoubleClick={onStartEdit}>{group.name}</span>
         )}
-
         <div className="group-actions" onClick={(e) => e.stopPropagation()}>
           <button className="item-action-btn" onClick={() => onCreateSheetInGroup(group.id)} title="新建文稿">
             <Plus size={12} />
@@ -405,7 +733,6 @@ function GroupItem({
 
       {!collapsed && (
         <div className="group-children">
-          {/* Child groups */}
           {childGroups.map((cg) => (
             <GroupItem
               key={cg.id}
@@ -413,47 +740,62 @@ function GroupItem({
               level={level + 1}
               selectedGroupId={selectedGroupId}
               selectedSheetId={selectedSheetId}
+              selectedIds={selectedIds}
+              draggingId={draggingId}
+              dragOverGroupId={dragOverGroupId}
               isEditing={false}
               editName=""
+              renamingSheetId={renamingSheetId}
+              renameValue={renameValue}
               onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
               onSelectSheet={onSelectSheet}
-              onDeleteGroup={() => {
-                if (confirm(`删除分组"${cg.name}"？`)) {
-                  useNoteStore.getState().deleteGroup(cg.id);
-                }
-              }}
+              onToggleSelect={onToggleSelect}
+              onToggleCheck={onToggleCheck}
+              onCreateSheetInGroup={onCreateSheetInGroup}
+              onDeleteGroup={() => useNoteStore.getState().deleteGroup(cg.id)}
               onDeleteSheet={onDeleteSheet}
               onStartEdit={() => {}}
               onEditNameChange={() => {}}
               onSubmitEdit={() => {}}
               onKeyDown={() => {}}
-              onCreateSheetInGroup={onCreateSheetInGroup}
               onContextMenuGroup={onContextMenuGroup}
               onContextMenuSheet={onContextMenuSheet}
+              onRenameSheet={onRenameSheet}
+              onRenameChange={onRenameChange}
+              onRenameSubmit={onRenameSubmit}
+              onRenameCancel={onRenameCancel}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onGroupDragOver={onGroupDragOver}
+              onGroupDrop={onGroupDrop}
             />
           ))}
-
-          {/* Sheets in this group */}
           {childSheets.map((sheet) => (
-            <div
+            <SheetItem
               key={sheet.id}
-              className={`sheet-item ${selectedSheetId === sheet.id ? 'active' : ''}`}
-              style={{ paddingLeft: 12 + (level + 1) * 16 }}
-              onClick={() => onSelectSheet(sheet.id)}
+              sheet={sheet}
+              isSelected={selectedSheetId === sheet.id}
+              isChecked={selectedIds.has(sheet.id)}
+              isDragging={draggingId === sheet.id}
+              renamingId={renamingSheetId}
+              renameValue={renameValue}
+              onSelect={(e) => {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                  onToggleSelect(sheet.id, e);
+                } else {
+                  onSelectSheet(sheet.id);
+                }
+              }}
               onContextMenu={(e) => onContextMenuSheet?.(e, sheet.id, sheet.title)}
-            >
-              <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
-              <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
-              {sheet.type === 'code' && sheet.language && (
-                <span className="sheet-lang-badge">{sheet.language}</span>
-              )}
-              <button
-                className="item-delete-btn"
-                onClick={(e) => { e.stopPropagation(); onDeleteSheet(sheet.id); }}
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
+              onToggleCheck={() => onToggleCheck(sheet.id)}
+              onRenameChange={onRenameChange}
+              onRenameSubmit={() => onRenameSubmit(sheet.id)}
+              onRenameCancel={onRenameCancel}
+              onDelete={() => onDeleteSheet(sheet.id, sheet.title)}
+              onDragStart={(e) => onDragStart(e, sheet.id)}
+              onDragEnd={onDragEnd}
+              paddingLeft={12 + (level + 1) * 16}
+            />
           ))}
         </div>
       )}

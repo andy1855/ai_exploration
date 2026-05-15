@@ -53,6 +53,7 @@ export interface AppPreferences {
   theme: ThemeMode;
   sidebarWidth: number;
   editorFontSize: number;
+  editorFontFamily: string;
   showPreview: boolean;
   focusMode: boolean;
   showWordCount: boolean;

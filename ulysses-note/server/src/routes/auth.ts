@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db } from '../database';
-import { sendEmailCode, sendSmsCode } from '../services/notify';
+import { sendEmailCode } from '../services/notify';
 import { authenticate } from '../middleware/authenticate';
 
 const router = Router();
@@ -20,9 +20,6 @@ function generateNickname() {
 
 function isEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
-function isPhone(s: string) {
-  return /^1[3-9]\d{9}$/.test(s);
 }
 function randomCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -61,11 +58,11 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
     res.status(400).json({ error: '参数缺失' });
     return;
   }
-  const type = isEmail(target) ? 'email' : isPhone(target) ? 'phone' : null;
-  if (!type) {
-    res.status(400).json({ error: '请输入有效的邮箱或手机号' });
+  if (!isEmail(target)) {
+    res.status(400).json({ error: '请输入有效的邮箱地址' });
     return;
   }
+  const type = 'email';
 
   // Rate limit: max 5 codes per target per hour
   const recent = db.prepare(`
@@ -86,16 +83,9 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
   `).run(target, code, type, purpose, expiresAt);
 
   try {
-    if (type === 'email') {
-      await sendEmailCode(target, code, purpose);
-    } else {
-      await sendSmsCode(target, code, purpose);
-    }
-    const emailDevMode = type === 'email' && !process.env.SMTP_HOST;
-    const smsDevMode = type === 'phone' && !process.env.SMS_ACCESS_KEY_ID;
-    const devMode = emailDevMode || smsDevMode;
-    const devHint = smsDevMode ? '短信服务未配置，当前验证码' : '邮件服务未配置，当前验证码';
-    res.json({ ok: true, ...(devMode ? { devCode: code, devHint } : {}) });
+    await sendEmailCode(target, code, purpose);
+    const devMode = !process.env.SMTP_HOST;
+    res.json({ ok: true, ...(devMode ? { devCode: code, devHint: '邮件服务未配置，当前验证码' } : {}) });
   } catch (err) {
     console.error('Send code error:', err);
     res.status(500).json({ error: '发送失败，请稍后重试' });
@@ -104,24 +94,17 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
 
 // POST /api/auth/register
 router.post('/register', async (req: Request, res: Response): Promise<void> => {
-  const { target, code, password, nickname } = req.body as {
+  const { target, code, password, nickname, rememberMe } = req.body as {
     target: string;
     code: string;
     password?: string;
     nickname?: string;
+    rememberMe?: boolean;
   };
 
-  if (!target || !code) {
-    res.status(400).json({ error: '参数缺失' });
-    return;
-  }
-  const type = isEmail(target) ? 'email' : isPhone(target) ? 'phone' : null;
-  if (!type) {
-    res.status(400).json({ error: '无效的邮箱或手机号' });
-    return;
-  }
+  if (!target || !code) { res.status(400).json({ error: '参数缺失' }); return; }
+  if (!isEmail(target)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
 
-  // Check verification code
   const record = db.prepare(`
     SELECT * FROM verification_codes
     WHERE target = ? AND code = ? AND purpose = 'register'
@@ -129,65 +112,42 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     ORDER BY id DESC LIMIT 1
   `).get(target, code) as { id: number } | undefined;
 
-  if (!record) {
-    res.status(400).json({ error: '验证码错误或已过期' });
-    return;
-  }
+  if (!record) { res.status(400).json({ error: '验证码错误或已过期' }); return; }
 
-  // Check duplicate
-  const col = type === 'email' ? 'email' : 'phone';
-  const existing = db.prepare(`SELECT id FROM users WHERE ${col} = ?`).get(target);
-  if (existing) {
-    res.status(409).json({ error: '该账号已注册，请直接登录' });
-    return;
-  }
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(target);
+  if (existing) { res.status(409).json({ error: '该邮箱已注册，请直接登录' }); return; }
 
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
-
-  const result = db.prepare(`
-    INSERT INTO users (email, phone, password, nickname)
-    VALUES (?, ?, ?, ?)
-  `).run(
-    type === 'email' ? target : null,
-    type === 'phone' ? target : null,
-    passwordHash,
-    '待生成'
-  );
+  const result = db.prepare(`INSERT INTO users (email, phone, password, nickname) VALUES (?, NULL, ?, ?)`)
+    .run(target, passwordHash, '待生成');
 
   const userId = result.lastInsertRowid as number;
   const generatedNickname = nickname ?? generateNickname();
   db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(generatedNickname, userId);
   db.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').run(record.id);
 
-  const token = jwt.sign({ userId, target }, JWT_SECRET, { expiresIn: '7d' });
+  const expiresIn = rememberMe ? '30d' : '24h';
+  const expiresAt = Date.now() + (rememberMe ? 30 * 86400000 : 86400000);
+  const token = jwt.sign({ userId, target }, JWT_SECRET, { expiresIn });
 
-  recordLog({ userId, target, method: type === 'email' ? 'email_code' : 'phone_code', req, success: true });
-
-  res.json({ ok: true, token, userId, target, nickname: generatedNickname });
+  recordLog({ userId, target, method: 'email_code', req, success: true });
+  res.json({ ok: true, token, userId, target, nickname: generatedNickname, expiresAt });
 });
 
 // POST /api/auth/login
 router.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const { target, method, code, password } = req.body as {
+  const { target, method, code, password, rememberMe } = req.body as {
     target: string;
-    method: 'password' | 'email_code' | 'phone_code';
+    method: 'password' | 'email_code';
     code?: string;
     password?: string;
+    rememberMe?: boolean;
   };
 
-  if (!target || !method) {
-    res.status(400).json({ error: '参数缺失' });
-    return;
-  }
+  if (!target || !method) { res.status(400).json({ error: '参数缺失' }); return; }
+  if (!isEmail(target)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
 
-  const type = isEmail(target) ? 'email' : isPhone(target) ? 'phone' : null;
-  if (!type) {
-    res.status(400).json({ error: '无效的邮箱或手机号' });
-    return;
-  }
-
-  const col = type === 'email' ? 'email' : 'phone';
-  const user = db.prepare(`SELECT * FROM users WHERE ${col} = ?`).get(target) as {
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(target) as {
     id: number; email: string | null; phone: string | null; password: string | null; nickname: string | null;
   } | undefined;
 
@@ -229,10 +189,12 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     db.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').run(record.id);
   }
 
-  const token = jwt.sign({ userId: user.id, target }, JWT_SECRET, { expiresIn: '7d' });
+  const expiresIn = rememberMe ? '30d' : '24h';
+  const expiresAt = Date.now() + (rememberMe ? 30 * 86400000 : 86400000);
+  const token = jwt.sign({ userId: user.id, target }, JWT_SECRET, { expiresIn });
   recordLog({ userId: user.id, target, method, req, success: true });
 
-  res.json({ ok: true, token, userId: user.id, target, nickname: user.nickname ?? '' });
+  res.json({ ok: true, token, userId: user.id, target, nickname: user.nickname ?? '', expiresAt });
 });
 
 // GET /api/auth/me

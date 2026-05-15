@@ -27,6 +27,7 @@ function loadPreferences(): AppPreferences {
     theme: 'light',
     sidebarWidth: 280,
     editorFontSize: 16,
+    editorFontFamily: 'system',
     showPreview: true,
     focusMode: false,
     showWordCount: true,
@@ -59,7 +60,10 @@ interface NoteState {
   createSheet: (groupId?: string, type?: SheetType, language?: string | null) => string;
   updateSheet: (id: string, updates: Partial<Sheet>) => void;
   deleteSheet: (id: string) => void;
+  deleteSheets: (ids: string[]) => void;
   moveSheet: (id: string, groupId: string | null) => void;
+  moveSheets: (ids: string[], groupId: string | null) => void;
+  copySheet: (id: string, groupId?: string | null) => string;
   selectSheet: (id: string | null) => void;
 
   // Group actions
@@ -159,6 +163,51 @@ export const useNoteStore = create<NoteState>((set, get) => {
         saveData(sheets, state.groups);
         return { sheets };
       });
+    },
+
+    moveSheets: (ids, groupId) => {
+      const idSet = new Set(ids);
+      set((state) => {
+        const sheets = state.sheets.map((s) =>
+          idSet.has(s.id) ? { ...s, groupId, updatedAt: Date.now() } : s
+        );
+        saveData(sheets, state.groups);
+        return { sheets };
+      });
+    },
+
+    deleteSheets: (ids) => {
+      const idSet = new Set(ids);
+      set((state) => {
+        const sheets = state.sheets.filter((s) => !idSet.has(s.id));
+        saveData(sheets, state.groups);
+        return {
+          sheets,
+          selectedSheetId: idSet.has(state.selectedSheetId ?? '')
+            ? sheets.length > 0 ? sheets[0].id : null
+            : state.selectedSheetId,
+        };
+      });
+    },
+
+    copySheet: (id, groupId) => {
+      const now = Date.now();
+      const src = useNoteStore.getState().sheets.find((s) => s.id === id);
+      if (!src) return '';
+      const copy: Sheet = {
+        ...src,
+        id: uuidv4(),
+        title: `${src.title} (副本)`,
+        createdAt: now,
+        updatedAt: now,
+        groupId: groupId !== undefined ? groupId : src.groupId,
+      };
+      set((state) => {
+        const sheets = [copy, ...state.sheets];
+        saveData(sheets, state.groups);
+        return { sheets, selectedSheetId: copy.id };
+      });
+      return copy.id;
     },
 
     selectSheet: (id) => set({ selectedSheetId: id }),

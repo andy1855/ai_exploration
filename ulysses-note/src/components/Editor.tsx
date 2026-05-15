@@ -11,8 +11,11 @@ import {
   AlertCircle,
   FileType,
   File,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
+import { ConfirmDialog } from './ConfirmDialog';
 import { LanguageIcon } from '../utils/languageUtils';
 
 export function Editor() {
@@ -29,9 +32,12 @@ export function Editor() {
   const sheet = sheets.find((s) => s.id === selectedSheetId);
   const [title, setTitle] = useState(sheet?.title ?? '');
   const [content, setContent] = useState(sheet?.content ?? '');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Sync local state when switching sheets
@@ -40,29 +46,40 @@ export function Editor() {
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
+  // Flush save and show status
+  const flushSave = useCallback((newTitle: string, newContent: string) => {
+    if (!selectedSheetId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    updateSheet(selectedSheetId, { title: newTitle, content: newContent });
+    setSaveStatus('saved');
+    savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
+  }, [selectedSheetId, updateSheet]);
+
   // Block Cmd/Ctrl+S to prevent browser save dialog; trigger immediate save instead
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
-        if (selectedSheetId) {
-          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-          updateSheet(selectedSheetId, { title, content });
-        }
+        flushSave(title, content);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedSheetId, title, content, updateSheet]);
+  }, [flushSave, title, content]);
 
   // Auto-save with debounce
   const save = useCallback(
     (newTitle: string, newContent: string) => {
       if (!selectedSheetId) return;
+      setSaveStatus('saving');
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         updateSheet(selectedSheetId, { title: newTitle, content: newContent });
-      }, 500);
+        setSaveStatus('saved');
+        savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
+      }, 600);
     },
     [selectedSheetId, updateSheet]
   );
@@ -95,9 +112,7 @@ export function Editor() {
 
   const handleDelete = () => {
     if (!selectedSheetId) return;
-    if (confirm('确定删除此文稿？')) {
-      deleteSheet(selectedSheetId);
-    }
+    setShowDeleteConfirm(true);
   };
 
   // Determine sheet type icon
@@ -148,6 +163,18 @@ export function Editor() {
                 {sheet.wordCount ?? 0} 字
               </span>
             </>
+          )}
+          {saveStatus === 'saving' && (
+            <span className="save-status saving">
+              <Loader2 size={11} className="save-spin" />
+              保存中
+            </span>
+          )}
+          {saveStatus === 'saved' && (
+            <span className="save-status saved">
+              <Check size={11} />
+              已保存
+            </span>
           )}
           {preferences.focusMode && (
             <span className="focus-badge">
@@ -231,6 +258,17 @@ export function Editor() {
             spellCheck
           />
         </div>
+      )}
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="删除文稿"
+          message={`确定要删除「${sheet.title || '未命名文稿'}」吗？此操作不可恢复。`}
+          confirmText="删除"
+          danger
+          onConfirm={() => { setShowDeleteConfirm(false); deleteSheet(selectedSheetId!); }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ListMusic, Mail, Phone, Lock, Hash, Eye, EyeOff, Send, LogIn, UserPlus, Clock, Shield } from 'lucide-react';
+import { ListMusic, Mail, Lock, Hash, Eye, EyeOff, Send, LogIn, UserPlus, Clock, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../api/auth';
 import type { LoginLog } from '../api/auth';
@@ -11,21 +11,16 @@ type LoginMethod = 'code' | 'password';
 function isEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
-function isPhone(s: string) {
-  return /^1[3-9]\d{9}$/.test(s);
-}
-function isValidTarget(s: string) {
-  return isEmail(s) || isPhone(s);
-}
 
 export function AuthPage() {
   const login = useAuthStore((s) => s.login);
   const [tab, setTab] = useState<Tab>('login');
-  const [target, setTarget] = useState('');
+  const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('code');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
@@ -37,28 +32,22 @@ export function AuthPage() {
     setCountdown(60);
     countdownRef.current = setInterval(() => {
       setCountdown((n) => {
-        if (n <= 1) {
-          clearInterval(countdownRef.current!);
-          return 0;
-        }
+        if (n <= 1) { clearInterval(countdownRef.current!); return 0; }
         return n - 1;
       });
     }, 1000);
   }
 
   async function handleSendCode() {
-    if (!isValidTarget(target)) {
-      setError('请输入有效的邮箱或手机号');
-      return;
-    }
+    if (!isEmail(email)) { setError('请输入有效的邮箱地址'); return; }
     setLoading(true);
     setError('');
     try {
-      const res = await authApi.sendCode(target, tab === 'login' ? 'login' : 'register');
+      const res = await authApi.sendCode(email, tab === 'login' ? 'login' : 'register');
       setCodeSent(true);
       startCountdown();
       if (res.devCode) {
-        setDevCode({ code: res.devCode, hint: res.devHint ?? '开发模式验证码' });
+        setDevCode({ code: res.devCode, hint: res.devHint ?? '邮件服务未配置，当前验证码' });
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '发送失败');
@@ -69,13 +58,13 @@ export function AuthPage() {
 
   async function handleSubmit() {
     setError('');
-    if (!isValidTarget(target)) { setError('请输入有效的邮箱或手机号'); return; }
+    if (!isEmail(email)) { setError('请输入有效的邮箱地址'); return; }
 
     if (tab === 'register') {
       if (!codeSent || !code) { setError('请先获取并填写验证码'); return; }
       setLoading(true);
       try {
-        const user = await authApi.register({ target, code, password: password || undefined });
+        const user = await authApi.register({ target: email, code, password: password || undefined, rememberMe });
         login(user);
       } catch (e) {
         setError(e instanceof ApiError ? e.message : '注册失败');
@@ -85,10 +74,9 @@ export function AuthPage() {
     } else {
       if (loginMethod === 'code') {
         if (!codeSent || !code) { setError('请先获取并填写验证码'); return; }
-        const type = isEmail(target) ? 'email_code' : 'phone_code';
         setLoading(true);
         try {
-          const user = await authApi.login({ target, method: type, code });
+          const user = await authApi.login({ target: email, method: 'email_code', code, rememberMe });
           login(user);
         } catch (e) {
           setError(e instanceof ApiError ? e.message : '登录失败');
@@ -99,7 +87,7 @@ export function AuthPage() {
         if (!password) { setError('请输入密码'); return; }
         setLoading(true);
         try {
-          const user = await authApi.login({ target, method: 'password', password });
+          const user = await authApi.login({ target: email, method: 'password', password, rememberMe });
           login(user);
         } catch (e) {
           setError(e instanceof ApiError ? e.message : '登录失败');
@@ -120,18 +108,14 @@ export function AuthPage() {
     if (countdownRef.current) clearInterval(countdownRef.current);
   }
 
-  const targetType = isEmail(target) ? 'email' : isPhone(target) ? 'phone' : null;
-
   return (
     <div className="auth-page">
       <div className="auth-card">
-        {/* Logo */}
         <div className="auth-logo">
           <ListMusic size={28} />
           <span>Ulysses Note</span>
         </div>
 
-        {/* Tabs */}
         <div className="auth-tabs">
           <button className={`auth-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => switchTab('login')}>
             <LogIn size={14} />登录
@@ -142,19 +126,19 @@ export function AuthPage() {
         </div>
 
         <div className="auth-form">
-          {/* Target input */}
+          {/* Email input */}
           <div className="auth-field">
             <label className="auth-label">
-              {targetType === 'email' ? <Mail size={13} /> : <Phone size={13} />}
-              {targetType === 'email' ? '邮箱' : targetType === 'phone' ? '手机号' : '邮箱 / 手机号'}
+              <Mail size={13} />邮箱
             </label>
             <input
               className="auth-input"
-              type="text"
-              placeholder="请输入邮箱或手机号"
-              value={target}
-              onChange={(e) => { setTarget(e.target.value); setError(''); }}
-              autoComplete="username"
+              type="email"
+              placeholder="请输入邮箱地址"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(''); }}
+              autoComplete="email"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
             />
           </div>
 
@@ -190,11 +174,12 @@ export function AuthPage() {
                   value={code}
                   maxLength={6}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
                 />
                 <button
                   className="send-code-btn"
                   onClick={handleSendCode}
-                  disabled={loading || countdown > 0 || !isValidTarget(target)}
+                  disabled={loading || countdown > 0 || !isEmail(email)}
                 >
                   {countdown > 0 ? (
                     <><Clock size={12} />{countdown}s</>
@@ -227,6 +212,7 @@ export function AuthPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete={tab === 'register' ? 'new-password' : 'current-password'}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
                 />
                 <button className="pwd-toggle" onClick={() => setShowPwd(!showPwd)}>
                   {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -234,6 +220,16 @@ export function AuthPage() {
               </div>
             </div>
           )}
+
+          {/* Remember me */}
+          <label className="auth-remember-row">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
+            <span>30 天内免登录</span>
+          </label>
 
           {error && <p className="auth-error">{error}</p>}
 
@@ -263,7 +259,6 @@ interface LogsPanelProps {
 const METHOD_LABEL: Record<string, string> = {
   password: '密码',
   email_code: '邮箱验证码',
-  phone_code: '手机验证码',
 };
 
 export function LoginLogsPanel({ onClose }: LogsPanelProps) {
