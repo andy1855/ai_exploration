@@ -3,7 +3,6 @@ import { notesApi } from '../api/notes';
 
 export const NOTES_STORAGE_KEY = 'lemon-note-data';
 const ULYSSES_STORAGE_KEY = 'ulysses-note-data';
-const MIGRATED_KEY = 'lemon-note-migrated-from-ulysses';
 const DATA_FILE = 'lemon-note-data.json';
 const IDB_NAME = 'lemon-note-fs';
 const IDB_STORE = 'handles';
@@ -118,21 +117,18 @@ export async function persistNotes(sheets: Sheet[], groups: Group[]): Promise<vo
 }
 
 /**
- * 从 ulysses-note 的 localStorage 数据一次性迁移到 lemon-note。
- * 仅在 lemon-note 无数据且 ulysses-note 有数据时执行。
+ * 从 ulysses-note 的 localStorage 数据迁移到 lemon-note。
+ * 当 lemon-note 数据为空但 ulysses-note 还有数据时恢复。
  */
 function tryMigrateFromUlysses(): { sheets: Sheet[]; groups: Group[] } | null {
   try {
-    if (localStorage.getItem(MIGRATED_KEY)) return null;
     const raw = localStorage.getItem(ULYSSES_STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!Array.isArray(data.sheets)) return null;
-    // 标记已迁移，避免重复执行
-    localStorage.setItem(MIGRATED_KEY, '1');
+    if (!Array.isArray(data.sheets) || data.sheets.length === 0) return null;
     // 将 ulysses 数据写入 lemon-note 的 key
     localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify({ sheets: data.sheets, groups: data.groups ?? [] }));
-    console.log('[migrate] ulysses-note 笔记已迁移到 lemon-note');
+    console.log('[migrate] ulysses-note 笔记已恢复到 lemon-note');
     return { sheets: data.sheets, groups: data.groups ?? [] };
   } catch (e) {
     console.warn('[migrate] ulysses-note 数据迁移失败', e);
@@ -141,11 +137,15 @@ function tryMigrateFromUlysses(): { sheets: Sheet[]; groups: Group[] } | null {
 }
 
 export function loadNotesFromLocalStorage(): { sheets: Sheet[]; groups: Group[] } {
+  // 1) 读 lemon-note 数据
   try {
     const raw = localStorage.getItem(NOTES_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.sheets) && parsed.sheets.length > 0) return parsed;
+    }
   } catch {}
-  // 无 lemon-note 数据 → 尝试从 ulysses-note 迁移
+  // 2) lemon-note 为空 → 尝试从 ulysses-note 恢复
   const migrated = tryMigrateFromUlysses();
   if (migrated) return migrated;
   return { sheets: [], groups: [] };
@@ -237,7 +237,7 @@ async function pushToServer(sheets: Sheet[], groups: Group[]) {
  */
 export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] } | null> {
   // 1) 先读本地数据（不要提前覆盖）
-  const local = loadNotesFromLocalStorage();
+  let local = loadNotesFromLocalStorage();
 
   // 2) 拉取服务器数据
   const server = await fetchFromServer();
@@ -248,8 +248,15 @@ export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] 
     return server;
   }
 
+  // 3) 服务器空，本地有 → 推送到服务器
   if (local.sheets.length > 0) {
-    // 服务器无数据，本地有 → 推送到服务器
+    await pushToServer(local.sheets, local.groups);
+    return local;
+  }
+
+  // 4) 服务器空 + 本地空 → 尝试从 ulysses-note 恢复
+  local = tryMigrateFromUlysses();
+  if (local && local.sheets.length > 0) {
     await pushToServer(local.sheets, local.groups);
     return local;
   }
