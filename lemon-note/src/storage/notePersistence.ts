@@ -1,5 +1,6 @@
 import type { Sheet, Group } from '../types';
 import { notesApi } from '../api/notes';
+import { tryAutoBackup } from './noteBackup';
 
 export const NOTES_STORAGE_KEY = 'lemon-note-data';
 const ULYSSES_STORAGE_KEY = 'ulysses-note-data';
@@ -265,11 +266,14 @@ export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] 
 }
 
 /**
- * 笔记变更后调用：保存到 localStorage 并调度推送到服务器（防抖 2s）。
+ * 笔记变更后调用：保存到 localStorage、自动备份、调度推送到服务器（防抖 2s）。
  */
 export function onChangeSync(sheets: Sheet[], groups: Group[]) {
   // 保存到 localStorage
   persistNotes(sheets, groups);
+
+  // 自动备份（低频触发，不影响性能）
+  tryAutoBackup(sheets, groups);
 
   // 调度服务器推送（防抖）
   if (syncToken) clearTimeout(syncToken);

@@ -1454,43 +1454,9 @@ a {
 }
 
 /* ── Markdown “M” badge ── */
-.markdown-m-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+.toolbar-md-icon {
   color: var(--accent);
-  background: var(--accent-light);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  line-height: 1;
   flex-shrink: 0;
-}
-
-[data-theme='dark'] .markdown-m-icon {
-  border-color: rgba(96, 165, 250, 0.28);
-}
-
-.toolbar-md-icon.markdown-m-icon {
-  min-width: 20px;
-  height: 20px;
-  font-size: 11px;
-}
-
-.markdown-m-icon--card {
-  min-width: 44px;
-  height: 44px;
-  font-size: 18px;
-  border-radius: var(--radius-md);
-}
-
-.type-card .markdown-m-icon--card {
-  color: var(--accent);
 }
 
 /* ── Editor view mode chips ── */
@@ -2520,6 +2486,44 @@ a {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 2px;
+}
+
+/* ── Backup list in settings ── */
+.settings-backup-list {
+  margin-bottom: 12px;
+}
+
+.settings-backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  background: var(--bg-secondary);
+}
+
+.settings-backup-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-backup-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-backup-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.settings-backup-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .account-copy-btn {

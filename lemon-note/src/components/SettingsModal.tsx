@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space, Download, Upload, RotateCcw } from 'lucide-react';
 import { useNoteStore } from '../store/useNoteStore';
 import type { ThemeMode } from '../types';
 import {
@@ -9,6 +9,9 @@ import {
   persistNotes,
   unbindLocalDataDirectory,
 } from '../storage/notePersistence';
+import { getBackupList, exportBackup, parseBackupFile } from '../storage/noteBackup';
+import { notesApi } from '../api/notes';
+import type { BackupEntry } from '../storage/noteBackup';
 
 interface Props {
   onClose: () => void;
@@ -53,6 +56,7 @@ export function SettingsModal({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('appearance');
   const [dataHint, setDataHint] = useState('');
   const [usingLocalDir, setUsingLocalDir] = useState(() => isUsingLocalDirectory());
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setUsingLocalDir(isUsingLocalDirectory());
@@ -337,30 +341,81 @@ export function SettingsModal({ onClose }: Props) {
               </div>
               {dataHint && <p className="settings-data-message">{dataHint}</p>}
 
-              <h4 className="settings-section-title settings-section-title--spaced">备份</h4>
-              <div className="settings-item settings-item-row">
+              <h4 className="settings-section-title settings-section-title--spaced">自动备份</h4>
+              <p className="settings-prose">
+                每次编辑文稿时自动创建历史快照，最多保留 5 份。可导出为 JSON 文件长期保存。
+              </p>
+
+              <div className="settings-backup-list">
+                {(() => {
+                  const backups = getBackupList();
+                  return (
+                    <>
+                      {backups.length === 0 && (
+                        <p className="settings-desc" style={{ marginBottom: 8 }}>暂无自动备份，编辑文稿后将自动生成。</p>
+                      )}
+                      {backups.map((b) => (
+                        <div key={b.id} className="settings-backup-row">
+                          <div className="settings-backup-info">
+                            <span className="settings-backup-label">{b.label}</span>
+                            <span className="settings-backup-time">
+                              {new Date(b.timestamp).toLocaleString('zh-CN')}
+                            </span>
+                          </div>
+                          <div className="settings-backup-actions">
+                            <button
+                              className="settings-action-btn compact"
+                              title="导出此备份"
+                              onClick={() => exportBackup(b)}
+                            >
+                              <Download size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="settings-item settings-item-row" style={{ marginTop: 12 }}>
                 <div className="settings-item-label">
-                  <span>导出所有数据</span>
-                  <span className="settings-desc">将文稿导出为 JSON 文件</span>
+                  <span>从文件导入</span>
+                  <span className="settings-desc">选择之前导出的 JSON 备份文件</span>
                 </div>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".json"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const parsed = await parseBackupFile(file);
+                      const { sheets, groups } = useNoteStore.getState();
+                      useNoteStore.setState({
+                        sheets: [...sheets, ...parsed.sheets],
+                        groups: [...groups, ...parsed.groups],
+                      });
+                      await notesApi.syncAll({
+                        sheets: useNoteStore.getState().sheets,
+                        groups: useNoteStore.getState().groups,
+                      });
+                      onClose();
+                      alert(`已导入 ${parsed.sheets.length} 篇文稿`);
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : '导入失败');
+                    }
+                    e.target.value = '';
+                  }}
+                />
                 <button
                   className="settings-action-btn"
-                  onClick={() => {
-                    const data = {
-                      sheets: useNoteStore.getState().sheets,
-                      groups: useNoteStore.getState().groups,
-                      exportedAt: new Date().toISOString(),
-                    };
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `lemon-note-backup-${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
+                  onClick={() => importFileRef.current?.click()}
                 >
-                  导出 JSON
+                  <Upload size={14} style={{ marginRight: 4 }} />
+                  导入 JSON
                 </button>
               </div>
             </section>

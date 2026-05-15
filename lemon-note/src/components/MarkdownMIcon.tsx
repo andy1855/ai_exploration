@@ -1,8 +1,6 @@
-/** Markdown 文稿列表/工具栏上的 “M” 标记 */
-export function MarkdownMIcon({ className = '' }: { className?: string }) {
-  return (
-    <span className={`markdown-m-icon ${className}`.trim()} aria-hidden>
-      M
-    </span>
-  );
+import { FileText } from 'lucide-react';
+
+/** Markdown 文稿列表/工具栏上的图标 */
+export function MarkdownMIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return <FileText size={size} className={className} />;
 }
