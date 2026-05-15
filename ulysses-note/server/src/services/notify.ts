@@ -1,6 +1,10 @@
 import nodemailer from 'nodemailer';
+import Dysmsapi, * as $Dysmsapi from '@alicloud/dysmsapi20170525';
+import * as $OpenApi from '@alicloud/openapi-client';
 
-function createTransport() {
+// ── Email ──────────────────────────────────────────────────────────────────
+
+function createEmailTransport() {
   if (!process.env.SMTP_HOST) return null;
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -14,7 +18,7 @@ function createTransport() {
 }
 
 export async function sendEmailCode(email: string, code: string, purpose: string): Promise<void> {
-  const transporter = createTransport();
+  const transporter = createEmailTransport();
   const subject = purpose === 'register' ? '注册验证码' : '登录验证码';
   const text = `您的验证码是：${code}，10分钟内有效。`;
 
@@ -30,8 +34,46 @@ export async function sendEmailCode(email: string, code: string, purpose: string
   });
 }
 
-export async function sendSmsCode(phone: string, code: string, purpose: string): Promise<void> {
-  // TODO: 接入短信服务商 (阿里云 SMS / 腾讯云等)
-  // 当前为开发模式：打印验证码到控制台
-  console.log(`[DEV SMS] To: ${phone} | purpose: ${purpose} | code: ${code}`);
+// ── SMS (阿里云短信) ──────────────────────────────────────────────────────
+
+function createSmsClient(): Dysmsapi | null {
+  const { SMS_ACCESS_KEY_ID, SMS_ACCESS_KEY_SECRET } = process.env;
+  if (!SMS_ACCESS_KEY_ID || !SMS_ACCESS_KEY_SECRET) return null;
+
+  const config = new $OpenApi.Config({
+    accessKeyId: SMS_ACCESS_KEY_ID,
+    accessKeySecret: SMS_ACCESS_KEY_SECRET,
+    endpoint: 'dysmsapi.aliyuncs.com',
+  });
+  return new Dysmsapi(config);
+}
+
+export async function sendSmsCode(phone: string, code: string, _purpose: string): Promise<void> {
+  const client = createSmsClient();
+
+  if (!client) {
+    console.log(`[DEV SMS] To: ${phone} | code: ${code}`);
+    return;
+  }
+
+  const signName = process.env.SMS_SIGN_NAME ?? '';
+  const templateCode = process.env.SMS_TEMPLATE_CODE ?? '';
+
+  if (!signName || !templateCode) {
+    console.warn('[SMS] SMS_SIGN_NAME or SMS_TEMPLATE_CODE not configured, skipping send');
+    return;
+  }
+
+  const request = new $Dysmsapi.SendSmsRequest({
+    phoneNumbers: phone,
+    signName,
+    templateCode,
+    templateParam: JSON.stringify({ code }),
+  });
+
+  const response = await client.sendSms(request);
+  const body = response.body;
+  if (!body || body.code !== 'OK') {
+    throw new Error(`短信发送失败：${body?.message ?? 'unknown'} (${body?.code ?? 'unknown'})`);
+  }
 }
