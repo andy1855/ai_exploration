@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { AuthPage, LoginLogsPanel } from './components/AuthModal';
+import { LemonLogo } from './components/LemonLogo';
 import { AccountPanel } from './components/AccountPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
