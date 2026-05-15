@@ -40,11 +40,77 @@ function formatWordCount(chinese: number, english: number): string {
   return '0 字';
 }
 
+// Scroll a textarea so the character at `idx` is centered in view
+function scrollTextareaToIndex(ta: HTMLTextAreaElement, idx: number) {
+  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+  const lines = ta.value.slice(0, idx).split('\n').length - 1;
+  ta.scrollTop = Math.max(0, lines * lineHeight - ta.clientHeight / 3);
+}
+
+// Inject <mark> highlights into the markdown preview pane and scroll to first match
+function highlightPreviewPane(query: string, container: Element | null) {
+  if (!container) return;
+  const preview = container.querySelector('.wmde-markdown');
+  if (!preview) return;
+
+  // Remove old highlights
+  preview.querySelectorAll('mark.editor-search-hl').forEach((m) => {
+    const parent = m.parentNode;
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent ?? ''), m);
+      parent.normalize();
+    }
+  });
+
+  if (!query) return;
+
+  const lowerQ = query.toLowerCase();
+  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      const tag = (node.parentElement?.tagName ?? '').toUpperCase();
+      if (['SCRIPT', 'STYLE', 'MARK', 'CODE'].includes(tag)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const textNodes: Text[] = [];
+  let n: Node | null;
+  while ((n = walker.nextNode())) textNodes.push(n as Text);
+
+  let firstMark: Element | null = null;
+
+  for (const tn of textNodes) {
+    const text = tn.textContent ?? '';
+    const lower = text.toLowerCase();
+    if (!lower.includes(lowerQ)) continue;
+
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let pos = lower.indexOf(lowerQ, 0);
+
+    while (pos !== -1) {
+      if (pos > last) frag.appendChild(document.createTextNode(text.slice(last, pos)));
+      const mark = document.createElement('mark');
+      mark.className = 'editor-search-hl';
+      mark.textContent = text.slice(pos, pos + query.length);
+      frag.appendChild(mark);
+      if (!firstMark) firstMark = mark;
+      last = pos + query.length;
+      pos = lower.indexOf(lowerQ, last);
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    tn.parentNode?.replaceChild(frag, tn);
+  }
+
+  firstMark?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 export function Editor() {
   const {
     sheets,
     selectedSheetId,
     preferences,
+    searchQuery,
     updateSheet,
     deleteSheet,
     updatePreferences,
@@ -69,6 +135,48 @@ export function Editor() {
     setTitle(sheet?.title ?? '');
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
+
+  // Jump to search match when opening a document from search results
+  useEffect(() => {
+    if (!searchQuery || !sheet) return;
+
+    const jumpToMatch = () => {
+      const text = sheet.content;
+      const lower = text.toLowerCase();
+      const idx = lower.indexOf(searchQuery.toLowerCase());
+      if (idx === -1) return;
+      const endIdx = idx + searchQuery.length;
+
+      if (isMarkdown) {
+        // Highlight in preview pane (if visible)
+        highlightPreviewPane(searchQuery, editorContainerRef.current);
+        // Select in edit pane
+        const ta = editorContainerRef.current?.querySelector(
+          '.w-md-editor-text-input'
+        ) as HTMLTextAreaElement | null;
+        if (ta) {
+          ta.setSelectionRange(idx, endIdx);
+          scrollTextareaToIndex(ta, idx);
+        }
+      } else if (!isCode && textareaRef.current) {
+        const ta = textareaRef.current;
+        ta.setSelectionRange(idx, endIdx);
+        scrollTextareaToIndex(ta, idx);
+      }
+    };
+
+    // Delay slightly so the editor DOM is ready after sheet switch
+    const t = setTimeout(jumpToMatch, 200);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet?.id, searchQuery]);
+
+  // Clear preview highlights when search is cleared
+  useEffect(() => {
+    if (!searchQuery) {
+      highlightPreviewPane('', editorContainerRef.current);
+    }
+  }, [searchQuery]);
 
   // Apply line-height and letter-spacing CSS variables
   useEffect(() => {

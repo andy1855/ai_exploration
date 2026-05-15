@@ -2527,6 +2527,20 @@ a {
   background: rgba(250, 204, 21, 0.3);
 }
 
+/* Highlight injected into markdown preview */
+mark.editor-search-hl {
+  background: rgba(250, 204, 21, 0.55);
+  color: inherit;
+  border-radius: 2px;
+  padding: 1px 2px;
+  font-style: inherit;
+  font-weight: inherit;
+}
+
+[data-theme='dark'] mark.editor-search-hl {
+  background: rgba(250, 204, 21, 0.35);
+}
+
 .sheet-snippet {
   display: block;
   font-size: 11px;
