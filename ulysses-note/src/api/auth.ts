@@ -33,6 +33,12 @@ export const authApi = {
   changePassword: (oldPassword: string | undefined, newPassword: string) =>
     api.post<{ ok: boolean }>('/auth/change-password', { oldPassword, newPassword }),
 
+  updateProfile: (nickname: string) =>
+    api.put<{ ok: boolean; nickname: string }>('/auth/profile', { nickname }),
+
+  changeEmail: (newEmail: string, code: string) =>
+    api.post<{ ok: boolean; email: string }>('/auth/change-email', { newEmail, code }),
+
   getLogs: (page = 1, limit = 20) =>
     api.get<{ logs: LoginLog[]; total: number; page: number; limit: number }>(`/logs?page=${page}&limit=${limit}`),
 };

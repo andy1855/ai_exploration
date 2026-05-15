@@ -19,10 +19,12 @@ import {
   FilePlus,
   FolderPlus,
   Copy,
+  UserCog,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
 import { SettingsModal } from './SettingsModal';
 import { LoginLogsPanel } from './AuthModal';
+import { AccountPanel } from './AccountPanel';
 import { LanguageIcon } from '../utils/languageUtils';
 import { useAuthStore } from '../store/useAuthStore';
 import { ContextMenu, useContextMenu } from './ContextMenu';
@@ -52,6 +54,7 @@ export function Sidebar() {
   const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const { nickname, target, logout } = useAuthStore();
@@ -139,6 +142,9 @@ export function Sidebar() {
           <span className="user-bar-target">{nickname ? target : ''}</span>
         </div>
         <div className="user-bar-actions">
+          <button className="icon-btn" onClick={() => setShowAccount(true)} title="账户信息">
+            <UserCog size={14} />
+          </button>
           <button className="icon-btn" onClick={() => setShowLogs(true)} title="登录记录">
             <Shield size={14} />
           </button>
@@ -273,6 +279,9 @@ export function Sidebar() {
 
       {/* Login logs */}
       {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
+
+      {/* Account panel */}
+      {showAccount && <AccountPanel onClose={() => setShowAccount(false)} />}
 
       {/* Global context menu */}
       {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.items} onClose={closeCtx} />}
