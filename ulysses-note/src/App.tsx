@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
+import { AuthPage } from './components/AuthModal';
 import { useNoteStore } from './store/useNoteStore';
+import { useAuthStore } from './store/useAuthStore';
 import './styles/global.css';
 
 function applyTheme(theme: string) {
@@ -15,6 +17,7 @@ function applyTheme(theme: string) {
 
 function App() {
   const { preferences } = useNoteStore();
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
 
   useEffect(() => {
     applyTheme(preferences.theme);
@@ -35,6 +38,8 @@ function App() {
       `${preferences.editorFontSize}px`
     );
   }, [preferences.editorFontSize]);
+
+  if (!isLoggedIn) return <AuthPage />;
 
   return (
     <div className="app">

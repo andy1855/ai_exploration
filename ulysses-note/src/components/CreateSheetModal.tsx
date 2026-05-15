@@ -3,6 +3,7 @@ import { useNoteStore } from '../store/useNoteStore';
 import { FileText, FileCode, FileType, X } from 'lucide-react';
 import type { SheetType } from '../types';
 import { CODE_LANGUAGES } from '../types';
+import { LanguageIcon, getLanguageExtName } from '../utils/languageUtils';
 
 interface Props {
   groupId?: string;
@@ -50,8 +51,8 @@ export function CreateSheetModal({ groupId, onClose }: Props) {
 
               <button className="type-card" onClick={() => handleTypeSelect('markdown')}>
                 <FileType size={28} />
-                <span className="type-card-title">MD 文档</span>
-                <span className="type-card-desc">Markdown 格式，支持实时预览</span>
+                <span className="type-card-title">MD 文稿</span>
+                <span className="type-card-desc">Markdown 格式，.md 后缀，支持实时预览</span>
               </button>
 
               <button className="type-card" onClick={() => handleTypeSelect('code')}>
@@ -73,7 +74,9 @@ export function CreateSheetModal({ groupId, onClose }: Props) {
                   className="lang-btn"
                   onClick={() => handleCodeLangSelect(lang.value)}
                 >
-                  {lang.label}
+                  <LanguageIcon language={lang.value} size={18} />
+                  <span className="lang-btn-label">{lang.label}</span>
+                  <span className="lang-btn-ext">{getLanguageExtName(lang.value)}</span>
                 </button>
               ))}
             </div>

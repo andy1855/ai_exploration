@@ -2,7 +2,6 @@ import { useState, type KeyboardEvent } from 'react';
 import { useNoteStore } from '../store/useNoteStore';
 import {
   Folder,
-  FileText,
   FileType,
   Plus,
   Trash2,
@@ -14,10 +13,19 @@ import {
   ListMusic,
   File,
   Settings,
+  LogOut,
+  Shield,
+  Pencil,
+  FilePlus,
+  FolderPlus,
+  Copy,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
 import { SettingsModal } from './SettingsModal';
+import { LoginLogsPanel } from './AuthModal';
 import { LanguageIcon } from '../utils/languageUtils';
+import { useAuthStore } from '../store/useAuthStore';
+import { ContextMenu, useContextMenu } from './ContextMenu';
 
 export function Sidebar() {
   const {
@@ -43,6 +51,11 @@ export function Sidebar() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const { nickname, target, logout } = useAuthStore();
+  const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu();
 
   // Get root groups and ungrouped sheets
   const rootGroups = getChildGroups(null);
@@ -51,6 +64,25 @@ export function Sidebar() {
   const openCreateModal = (groupId?: string) => {
     setCreateInGroupId(groupId);
     setShowCreateModal(true);
+  };
+
+  const handleCtxGroup = (e: React.MouseEvent, groupId: string, groupName: string) => {
+    openCtx(e, [
+      { label: '新建文稿', icon: <FilePlus size={13} />, onClick: () => openCreateModal(groupId) },
+      { label: '新建子分组', icon: <FolderPlus size={13} />, onClick: () => { useNoteStore.getState().createGroup('新建分组', groupId); } },
+      { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setEditingGroupId(groupId); setEditName(groupName); } },
+      { separator: true },
+      { label: '删除分组', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm(`删除分组"${groupName}"？分组内的文稿将移出分组。`)) deleteGroup(groupId); } },
+    ]);
+  };
+
+  const handleCtxSheet = (e: React.MouseEvent, sheetId: string, sheetTitle: string) => {
+    openCtx(e, [
+      { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setRenamingSheetId(sheetId); setRenameValue(sheetTitle); } },
+      { label: '复制标题', icon: <Copy size={13} />, onClick: () => navigator.clipboard.writeText(sheetTitle) },
+      { separator: true },
+      { label: '删除文稿', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm('确定删除此文稿？')) deleteSheet(sheetId); } },
+    ]);
   };
 
   const handleGroupDoubleClick = (group: { id: string; name: string }) => {
@@ -94,12 +126,24 @@ export function Sidebar() {
           >
             {currentTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
-          <button
-            className="icon-btn"
-            onClick={() => setShowSettings(true)}
-            title="设置"
-          >
+          <button className="icon-btn" onClick={() => setShowSettings(true)} title="设置">
             <Settings size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* User info bar */}
+      <div className="sidebar-user-bar">
+        <div className="user-bar-info">
+          <span className="user-bar-nickname">{nickname || target}</span>
+          <span className="user-bar-target">{nickname ? target : ''}</span>
+        </div>
+        <div className="user-bar-actions">
+          <button className="icon-btn" onClick={() => setShowLogs(true)} title="登录记录">
+            <Shield size={14} />
+          </button>
+          <button className="icon-btn" onClick={logout} title="退出登录">
+            <LogOut size={14} />
           </button>
         </div>
       </div>
@@ -155,6 +199,8 @@ export function Sidebar() {
             onEditNameChange={setEditName}
             onSubmitEdit={() => handleGroupNameSubmit(group.id)}
             onKeyDown={(e) => handleGroupNameKeyDown(e, group.id)}
+            onContextMenuGroup={handleCtxGroup}
+            onContextMenuSheet={handleCtxSheet}
           />
         ))}
 
@@ -171,18 +217,33 @@ export function Sidebar() {
               key={sheet.id}
               className={`sheet-item ${selectedSheetId === sheet.id ? 'active' : ''}`}
               onClick={() => selectSheet(sheet.id)}
+              onContextMenu={(e) => openCtx(e, [
+                { label: '重命名', icon: <Pencil size={13} />, onClick: () => { setRenamingSheetId(sheet.id); setRenameValue(sheet.title); } },
+                { label: '复制标题', icon: <Copy size={13} />, onClick: () => navigator.clipboard.writeText(sheet.title) },
+                { separator: true },
+                { label: '删除文稿', icon: <Trash2 size={13} />, danger: true, onClick: () => { if (confirm('确定删除此文稿？')) deleteSheet(sheet.id); } },
+              ])}
             >
               <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
-              <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
-              {sheet.type === 'code' && sheet.language && (
-                <span className="sheet-lang-badge">{sheet.language}</span>
+              {renamingSheetId === sheet.id ? (
+                <input
+                  className="sheet-rename-input"
+                  value={renameValue}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => { if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() }); setRenamingSheetId(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() }); setRenamingSheetId(null); }
+                    if (e.key === 'Escape') setRenamingSheetId(null);
+                  }}
+                />
+              ) : (
+                <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
               )}
               <button
                 className="item-delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm('确定删除此文稿？')) deleteSheet(sheet.id);
-                }}
+                onClick={(e) => { e.stopPropagation(); if (confirm('确定删除此文稿？')) deleteSheet(sheet.id); }}
               >
                 <Trash2 size={12} />
               </button>
@@ -208,9 +269,13 @@ export function Sidebar() {
       )}
 
       {/* Settings modal */}
-      {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} />
-      )}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
+      {/* Login logs */}
+      {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
+
+      {/* Global context menu */}
+      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.items} onClose={closeCtx} />}
     </aside>
   );
 }
@@ -231,6 +296,8 @@ interface GroupItemProps {
   onSubmitEdit: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
   onCreateSheetInGroup: (groupId: string) => void;
+  onContextMenuGroup?: (e: React.MouseEvent, groupId: string, groupName: string) => void;
+  onContextMenuSheet?: (e: React.MouseEvent, sheetId: string, sheetTitle: string) => void;
 }
 
 function getSheetIcon(type?: string, language?: string | null) {
@@ -255,8 +322,10 @@ function GroupItem({
   onSubmitEdit,
   onKeyDown,
   onCreateSheetInGroup,
+  onContextMenuGroup,
+  onContextMenuSheet,
 }: GroupItemProps) {
-  const { groups: allGroups, getChildGroups, getSheetsByGroup, updateGroup } = useNoteStore();
+  const { getChildGroups, getSheetsByGroup, updateGroup } = useNoteStore();
   const [collapsed, setCollapsed] = useState(group.collapsed ?? false);
 
   const childGroups = getChildGroups(group.id);
@@ -282,6 +351,7 @@ function GroupItem({
         className={`group-item ${isSelected ? 'active' : ''}`}
         style={{ paddingLeft: 12 + level * 16 }}
         onClick={handleGroupClick}
+        onContextMenu={(e) => onContextMenuGroup?.(e, group.id, group.name)}
       >
         <button
           className="collapse-btn"
@@ -349,6 +419,8 @@ function GroupItem({
               onSubmitEdit={() => {}}
               onKeyDown={() => {}}
               onCreateSheetInGroup={onCreateSheetInGroup}
+              onContextMenuGroup={onContextMenuGroup}
+              onContextMenuSheet={onContextMenuSheet}
             />
           ))}
 
@@ -359,6 +431,7 @@ function GroupItem({
               className={`sheet-item ${selectedSheetId === sheet.id ? 'active' : ''}`}
               style={{ paddingLeft: 12 + (level + 1) * 16 }}
               onClick={() => onSelectSheet(sheet.id)}
+              onContextMenu={(e) => onContextMenuSheet?.(e, sheet.id, sheet.title)}
             >
               <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
               <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
@@ -367,10 +440,7 @@ function GroupItem({
               )}
               <button
                 className="item-delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteSheet(sheet.id);
-                }}
+                onClick={(e) => { e.stopPropagation(); onDeleteSheet(sheet.id); }}
               >
                 <Trash2 size={12} />
               </button>

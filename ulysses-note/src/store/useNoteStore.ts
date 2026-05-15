@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { Sheet, Group, AppPreferences, SheetType } from '../types';
+import { getLanguageExtName } from '../utils/languageUtils';
 
 const STORAGE_KEY = 'ulysses-note-data';
 const PREFS_KEY = 'ulysses-note-preferences';
@@ -93,7 +94,9 @@ export const useNoteStore = create<NoteState>((set, get) => {
 
     createSheet: (groupId?: string, type: SheetType = 'plain', language?: string | null) => {
       const now = Date.now();
-      const title = type === 'markdown' ? '未命名文档' : type === 'code' ? `未命名${language || '代码'}` : '未命名文稿';
+      const ext = type === 'code' ? getLanguageExtName(language) : type === 'markdown' ? '.md' : '';
+      const baseName = type === 'markdown' ? '未命名文稿' : type === 'code' ? '未命名代码' : '未命名文稿';
+      const title = `${baseName}${ext}`;
       const newSheet: Sheet = {
         id: uuidv4(),
         title,

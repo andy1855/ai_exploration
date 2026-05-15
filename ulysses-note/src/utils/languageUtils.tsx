@@ -178,6 +178,35 @@ export const LANGUAGE_META: Record<string, LanguageMeta> = {
   },
 };
 
+export const LANGUAGE_EXTENSIONS: Record<string, string> = {
+  javascript: '.js',
+  typescript: '.ts',
+  python: '.py',
+  java: '.java',
+  go: '.go',
+  rust: '.rs',
+  cpp: '.cpp',
+  c: '.c',
+  csharp: '.cs',
+  php: '.php',
+  ruby: '.rb',
+  swift: '.swift',
+  kotlin: '.kt',
+  sql: '.sql',
+  html: '.html',
+  css: '.css',
+  shell: '.sh',
+  yaml: '.yaml',
+  json: '.json',
+  xml: '.xml',
+  markdown: '.md',
+};
+
+export function getLanguageExtName(lang: string | null | undefined): string {
+  if (!lang) return '';
+  return LANGUAGE_EXTENSIONS[lang] ?? '';
+}
+
 export function getLanguageMeta(lang: string | null | undefined): LanguageMeta | null {
   if (!lang) return null;
   return LANGUAGE_META[lang] ?? null;
