@@ -290,8 +290,8 @@ export function LoginLogsPanel({ onClose }: LogsPanelProps) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content logs-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+      <div className="modal-content logs-modal modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-title">
             <Shield size={16} />

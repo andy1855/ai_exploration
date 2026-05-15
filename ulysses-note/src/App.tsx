@@ -4,6 +4,7 @@ import { Editor } from './components/Editor';
 import { AuthPage, LoginLogsPanel } from './components/AuthModal';
 import { AccountPanel } from './components/AccountPanel';
 import { SettingsModal } from './components/SettingsModal';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { useNoteStore } from './store/useNoteStore';
 import { useAuthStore } from './store/useAuthStore';
 import {
@@ -27,6 +28,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
 
   useEffect(() => {
     applyTheme(preferences.theme);
@@ -63,15 +65,28 @@ function App() {
     document.documentElement.style.setProperty('--editor-font-family', family);
   }, [preferences.editorFontFamily]);
 
-  // Fullscreen: escape key exits
+  // Fullscreen: escape key exits（有弹层时交由弹层处理）
   useEffect(() => {
     if (!preferences.fullscreen) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && document.querySelector('.modal-overlay')) return;
       if (e.key === 'Escape') updatePreferences({ fullscreen: false });
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [preferences.fullscreen, updatePreferences]);
+
+  // 全局搜索（⌘/Ctrl + F）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        setShowGlobalSearch(true);
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
 
   if (!isLoggedIn) return <AuthPage />;
 
@@ -107,8 +122,13 @@ function App() {
           <button className="icon-btn" onClick={() => setShowLogs(true)} title="登录记录">
             <Shield size={16} />
           </button>
-          <button className="topbar-user-btn" onClick={() => setShowAccount(true)} title="账户信息">
-            <User size={15} />
+          <button
+            type="button"
+            className="topbar-user-btn"
+            onClick={() => setShowAccount(true)}
+            title={displayName ? `账户信息：${displayName}` : '账户信息'}
+          >
+            <User size={15} className="topbar-user-icon" />
             <span className="topbar-username">{displayName}</span>
           </button>
           <button className="icon-btn" onClick={() => setShowSettings(true)} title="设置">
@@ -132,6 +152,7 @@ function App() {
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showAccount && <AccountPanel onClose={() => setShowAccount(false)} />}
       {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
+      {showGlobalSearch && <GlobalSearchModal onClose={() => setShowGlobalSearch(false)} />}
     </div>
   );
 }

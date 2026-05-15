@@ -3,6 +3,7 @@ import { X, User, Mail, Lock, Hash, Copy, Check, Send, Clock, Eye, EyeOff, Penci
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../api/auth';
 import { ApiError } from '../api/client';
+import { validateNickname, sanitizeNicknameInput } from '../utils/nicknameUtils';
 
 interface Props {
   onClose: () => void;
@@ -50,11 +51,15 @@ export function AccountPanel({ onClose }: Props) {
   }
 
   async function handleSaveNickname() {
-    if (!nicknameValue.trim()) return;
+    const v = validateNickname(nicknameValue);
+    if (!v.ok) {
+      setNicknameError(v.error);
+      return;
+    }
     setNicknameSaving(true);
     setNicknameError('');
     try {
-      const res = await authApi.updateProfile(nicknameValue.trim());
+      const res = await authApi.updateProfile(v.value);
       // Update auth store
       login({ userId: userId!, target: target!, nickname: res.nickname, token: token! });
       setEditingNickname(false);
@@ -116,8 +121,29 @@ export function AccountPanel({ onClose }: Props) {
     }
   }
 
-  function copyId() {
-    navigator.clipboard.writeText(displayId);
+  async function copyId() {
+    const text = displayId;
+    try {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error('fallback');
+      }
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        const ok = document.execCommand('copy');
+        if (!ok) throw new Error('execCommand failed');
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -125,8 +151,8 @@ export function AccountPanel({ onClose }: Props) {
   const isEmail = (s: string | null) => s && s.includes('@');
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content account-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+      <div className="modal-content account-modal modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-title">
             <User size={16} />
@@ -146,7 +172,7 @@ export function AccountPanel({ onClose }: Props) {
               </div>
               <div className="account-row-value">
                 <span className="account-id">{displayId}</span>
-                <button className="account-copy-btn" onClick={copyId} title="复制">
+                <button type="button" className="account-copy-btn" onClick={() => void copyId()} title="复制">
                   {copied ? <Check size={13} /> : <Copy size={13} />}
                 </button>
               </div>
@@ -164,22 +190,22 @@ export function AccountPanel({ onClose }: Props) {
                     <input
                       className="account-edit-input"
                       value={nicknameValue}
-                      maxLength={30}
                       autoFocus
-                      onChange={(e) => setNicknameValue(e.target.value)}
+                      onChange={(e) => setNicknameValue(sanitizeNicknameInput(e.target.value))}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveNickname();
+                        if (e.key === 'Enter') void handleSaveNickname();
                         if (e.key === 'Escape') { setEditingNickname(false); setNicknameValue(nickname ?? ''); }
                       }}
                     />
                     <button
+                      type="button"
                       className="account-save-btn"
-                      onClick={handleSaveNickname}
+                      onClick={() => void handleSaveNickname()}
                       disabled={nicknameSaving}
                     >
                       {nicknameSaving ? '…' : '保存'}
                     </button>
-                    <button className="account-cancel-btn" onClick={() => { setEditingNickname(false); setNicknameValue(nickname ?? ''); }}>取消</button>
+                    <button type="button" className="account-cancel-btn" onClick={() => { setEditingNickname(false); setNicknameValue(nickname ?? ''); }}>取消</button>
                   </div>
                 ) : (
                   <>
@@ -191,6 +217,11 @@ export function AccountPanel({ onClose }: Props) {
                 )}
               </div>
               {nicknameError && <p className="account-field-error">{nicknameError}</p>}
+              {editingNickname && (
+                <p className="account-nickname-hint">
+                  中英文、数字、下划线；不能以数字或下划线开头。含中文最多 10 字，纯英文最多 20 字符。
+                </p>
+              )}
             </div>
 
             {/* Email */}

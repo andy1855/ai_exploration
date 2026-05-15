@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNoteStore } from '../store/useNoteStore';
-import { FileText, FileCode, FileType, X } from 'lucide-react';
+import { FileText, FileCode, X } from 'lucide-react';
 import type { SheetType } from '../types';
 import { CODE_LANGUAGES } from '../types';
 import { LanguageIcon, getLanguageExtName } from '../utils/languageUtils';
+import { MarkdownMIcon } from './MarkdownMIcon';
 
 interface Props {
   groupId?: string;
@@ -31,8 +32,8 @@ export function CreateSheetModal({ groupId, onClose }: Props) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+      <div className="modal-content modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>新建文稿</h3>
           <button className="icon-btn" onClick={onClose}>
@@ -50,7 +51,7 @@ export function CreateSheetModal({ groupId, onClose }: Props) {
               </button>
 
               <button className="type-card" onClick={() => handleTypeSelect('markdown')}>
-                <FileType size={28} />
+                <MarkdownMIcon className="markdown-m-icon--card" />
                 <span className="type-card-title">MD 文稿</span>
                 <span className="type-card-desc">Markdown 格式，.md 后缀，支持实时预览</span>
               </button>

@@ -1,29 +1,33 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Sheet, Group, AppPreferences, SheetType } from '../types';
+import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode } from '../types';
 import { getLanguageExtName } from '../utils/languageUtils';
+import { textIncludesQuery } from '../utils/searchUtils';
+import { persistNotes, loadNotesFromLocalStorage } from '../storage/notePersistence';
 
-const STORAGE_KEY = 'ulysses-note-data';
 const PREFS_KEY = 'ulysses-note-preferences';
 
 function loadData(): { sheets: Sheet[]; groups: Group[] } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return { sheets: [], groups: [] };
+  return loadNotesFromLocalStorage();
 }
 
 function saveData(sheets: Sheet[], groups: Group[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ sheets, groups }));
+  void persistNotes(sheets, groups);
 }
 
 function loadPreferences(): AppPreferences {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (raw) {
-      const saved = JSON.parse(raw);
-      return { ...defaultPreferences, ...saved };
+      const saved = JSON.parse(raw) as Record<string, unknown>;
+      let editorViewMode: EditorViewMode = (saved.editorViewMode as EditorViewMode) ?? 'default';
+      if (saved.editorViewMode == null) {
+        if (saved.typewriterMode === true) editorViewMode = 'typewriter';
+        else if (saved.focusMode === true) editorViewMode = 'focus';
+      }
+      delete saved.focusMode;
+      delete saved.typewriterMode;
+      return { ...defaultPreferences, ...saved, editorViewMode } as AppPreferences;
     }
   } catch {}
   return { ...defaultPreferences };
@@ -37,9 +41,8 @@ const defaultPreferences: AppPreferences = {
   lineHeight: 1.8,
   letterSpacing: 0,
   showPreview: true,
-  focusMode: false,
+  editorViewMode: 'default',
   showWordCount: true,
-  typewriterMode: false,
   sidebarCollapsed: false,
   toolbarCollapsed: false,
   formattingBarCollapsed: false,
@@ -289,16 +292,13 @@ export const useNoteStore = create<NoteState>((set, get) => {
       const state = get();
       const { sheets, searchQuery, selectedGroupId } = state;
       let filtered = sheets;
-      if (selectedGroupId) {
-        filtered = filtered.filter((s) => s.groupId === selectedGroupId);
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      // 有搜索词时：在所有文稿中搜索，不受当前选中分组限制（否则会漏掉匹配的文档）
+      if (searchQuery.trim()) {
         filtered = filtered.filter(
-          (s) =>
-            s.title.toLowerCase().includes(q) ||
-            s.content.toLowerCase().includes(q)
+          (s) => textIncludesQuery(s.title, searchQuery) || textIncludesQuery(s.content, searchQuery)
         );
+      } else if (selectedGroupId) {
+        filtered = filtered.filter((s) => s.groupId === selectedGroupId);
       }
       return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
     },

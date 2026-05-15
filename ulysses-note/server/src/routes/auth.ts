@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { db } from '../database';
 import { sendEmailCode } from '../services/notify';
 import { authenticate } from '../middleware/authenticate';
+import { validateNickname } from '../utils/nickname';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret';
@@ -117,13 +118,23 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(target);
   if (existing) { res.status(409).json({ error: '该邮箱已注册，请直接登录' }); return; }
 
+  let finalNickname: string;
+  if (nickname != null && String(nickname).trim() !== '') {
+    const v = validateNickname(String(nickname));
+    if (!v.ok) {
+      res.status(400).json({ error: v.error });
+      return;
+    }
+    finalNickname = v.value;
+  } else {
+    finalNickname = generateNickname();
+  }
+
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
   const result = db.prepare(`INSERT INTO users (email, phone, password, nickname) VALUES (?, NULL, ?, ?)`)
-    .run(target, passwordHash, '待生成');
+    .run(target, passwordHash, finalNickname);
 
   const userId = result.lastInsertRowid as number;
-  const generatedNickname = nickname ?? generateNickname();
-  db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(generatedNickname, userId);
   db.prepare('UPDATE verification_codes SET used = 1 WHERE id = ?').run(record.id);
 
   const expiresIn = rememberMe ? '30d' : '24h';
@@ -131,7 +142,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   const token = jwt.sign({ userId, target }, JWT_SECRET, { expiresIn });
 
   recordLog({ userId, target, method: 'email_code', req, success: true });
-  res.json({ ok: true, token, userId, target, nickname: generatedNickname, expiresAt });
+  res.json({ ok: true, token, userId, target, nickname: finalNickname, expiresAt });
 });
 
 // POST /api/auth/login
@@ -230,12 +241,17 @@ router.post('/change-password', authenticate, async (req: Request, res: Response
 // PUT /api/auth/profile — update nickname
 router.put('/profile', authenticate, (req: Request, res: Response): void => {
   const { nickname } = req.body as { nickname: string };
-  if (!nickname || nickname.trim().length < 1 || nickname.trim().length > 30) {
-    res.status(400).json({ error: '用户名长度 1-30 字' });
+  if (nickname == null || String(nickname).trim() === '') {
+    res.status(400).json({ error: '用户名不能为空' });
     return;
   }
-  db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(nickname.trim(), req.user!.userId);
-  res.json({ ok: true, nickname: nickname.trim() });
+  const v = validateNickname(String(nickname));
+  if (!v.ok) {
+    res.status(400).json({ error: v.error });
+    return;
+  }
+  db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(v.value, req.user!.userId);
+  res.json({ ok: true, nickname: v.value });
 });
 
 // POST /api/auth/change-email — bind or change email with verification code

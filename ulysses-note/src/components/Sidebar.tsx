@@ -3,7 +3,6 @@ import { useNoteStore } from '../store/useNoteStore';
 import type { Sheet } from '../types';
 import {
   Folder,
-  FileType,
   Plus,
   Trash2,
   ChevronRight,
@@ -21,33 +20,46 @@ import {
   Layers,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
+import { MarkdownMIcon } from './MarkdownMIcon';
 import { LanguageIcon } from '../utils/languageUtils';
 import { ContextMenu, useContextMenu } from './ContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
+import { escapeRegExp, textIncludesQuery } from '../utils/searchUtils';
 
 // ─── Highlight helper ─────────────────────────────────────────
 function HighlightText({ text, query }: { text: string; query: string }) {
-  if (!query) return <>{text}</>;
-  const lower = text.toLowerCase();
-  const idx = lower.indexOf(query.toLowerCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="search-highlight">{text.slice(idx, idx + query.length)}</mark>
-      {text.slice(idx + query.length)}
-    </>
-  );
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  try {
+    const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, 'gi'));
+    return (
+      <>
+        {parts.map((part, i) =>
+          i % 2 === 1 ? (
+            <mark key={i} className="search-highlight">{part}</mark>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </>
+    );
+  } catch {
+    return <>{text}</>;
+  }
 }
 
 function getContentSnippet(content: string, query: string): string {
-  const lower = content.toLowerCase();
-  const idx = lower.indexOf(query.toLowerCase());
+  const q = query.trim();
+  if (!q) return '';
+  const nc = content.normalize('NFKC');
+  const nq = q.normalize('NFKC');
+  const lower = nc.toLowerCase();
+  const lq = nq.toLowerCase();
+  const idx = lower.indexOf(lq);
   if (idx === -1) return '';
-  // Start close to the match so it's visible in the narrow snippet area
   const start = Math.max(0, idx - 6);
-  const end = Math.min(content.length, idx + query.length + 50);
-  const snippet = (start > 0 ? '…' : '') + content.slice(start, end) + (end < content.length ? '…' : '');
+  const end = Math.min(nc.length, idx + q.length + 50);
+  const snippet = (start > 0 ? '…' : '') + nc.slice(start, end) + (end < nc.length ? '…' : '');
   return snippet.replace(/[\n\r]+/g, ' ');
 }
 
@@ -61,8 +73,8 @@ interface MoveToModalProps {
 function MoveToModal({ sheetIds, onClose, onMoved }: MoveToModalProps) {
   const { groups, moveSheets } = useNoteStore();
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="move-to-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+      <div className="move-to-modal modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="move-to-header">
           <MoveRight size={14} />
           <span>移动到分组</span>
@@ -136,11 +148,12 @@ export function Sidebar() {
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null | 'root'>(undefined as unknown as null);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const [searchDraft, setSearchDraft] = useState(searchQuery);
   const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu();
 
   const rootGroups = getChildGroups(null);
   const ungroupedSheets = getSheetsByGroup(null);
-  const isSearching = !!searchQuery;
+  const isSearching = !!searchQuery.trim();
   const filteredSheets = isSearching ? getFilteredSheets() : null;
   const searchCount = filteredSheets?.length ?? 0;
 
@@ -149,18 +162,22 @@ export function Sidebar() {
     if (!batchMode) setSelectedIds(new Set());
   }, [batchMode]);
 
-  // Cmd+F to focus search
+  // 与全局搜索、侧栏清空等保持同步
+  useEffect(() => {
+    setSearchDraft(searchQuery);
+  }, [searchQuery]);
+
+  // Esc 清空侧栏搜索（无弹层时）；⌘F 由 App 打开全局搜索
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+      if (e.key === 'Escape' && searchQuery.trim()) {
+        if (document.querySelector('.modal-overlay')) return;
+        setSearchQuery('');
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [searchQuery, setSearchQuery]);
 
   const openCreateModal = (groupId?: string) => {
     setCreateInGroupId(groupId);
@@ -270,13 +287,28 @@ export function Sidebar() {
         <input
           ref={searchRef}
           type="text"
-          placeholder="搜索文稿… (⌘F)"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="搜索文稿…（回车搜索，Esc 清空）"
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              setSearchQuery(searchDraft.trim());
+            }
+          }}
           className="search-input"
         />
-        {searchQuery && (
-          <button className="search-clear-btn" onClick={() => setSearchQuery('')}><X size={12} /></button>
+        {(searchDraft || searchQuery) && (
+          <button
+            type="button"
+            className="search-clear-btn"
+            onClick={() => {
+              setSearchDraft('');
+              setSearchQuery('');
+            }}
+          >
+            <X size={12} />
+          </button>
         )}
       </div>
       {isSearching && (
@@ -330,9 +362,10 @@ export function Sidebar() {
       {isSearching ? (
         <div className="sidebar-groups">
           {filteredSheets!.map((sheet) => {
-            const titleMatch = sheet.title.toLowerCase().includes(searchQuery.toLowerCase());
-            const contentMatch = !titleMatch && sheet.content.toLowerCase().includes(searchQuery.toLowerCase());
-            const snippet = contentMatch ? getContentSnippet(sheet.content, searchQuery) : '';
+            const q = searchQuery.trim();
+            const titleMatch = textIncludesQuery(sheet.title, q);
+            const contentMatch = !titleMatch && textIncludesQuery(sheet.content, q);
+            const snippet = contentMatch ? getContentSnippet(sheet.content, q) : '';
             return (
               <SheetItem
                 key={sheet.id}
@@ -661,7 +694,7 @@ interface GroupItemProps {
 
 function getSheetIcon(type?: string, language?: string | null) {
   if (type === 'code') return <LanguageIcon language={language} size={14} />;
-  if (type === 'markdown') return <FileType size={14} />;
+  if (type === 'markdown') return <MarkdownMIcon />;
   return <File size={14} />;
 }
 

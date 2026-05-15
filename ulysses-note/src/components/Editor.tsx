@@ -1,15 +1,12 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import MDEditor from '@uiw/react-md-editor';
 import { useNoteStore } from '../store/useNoteStore';
+import type { EditorViewMode } from '../types';
 import {
   Eye,
   EyeOff,
-  Maximize2,
-  Minimize2,
   Trash2,
   FileText,
-  AlertCircle,
-  FileType,
   File,
   Check,
   Loader2,
@@ -28,10 +25,14 @@ import {
   Heading3,
   Strikethrough,
   Type,
+  LayoutTemplate,
+  Focus,
 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 import { ConfirmDialog } from './ConfirmDialog';
 import { LanguageIcon } from '../utils/languageUtils';
+import { escapeRegExp } from '../utils/searchUtils';
+import { MarkdownMIcon } from './MarkdownMIcon';
 
 function formatWordCount(chinese: number, english: number): string {
   if (chinese > 0 && english > 0) return `${chinese} 字 · ${english} 词`;
@@ -40,69 +41,86 @@ function formatWordCount(chinese: number, english: number): string {
   return '0 字';
 }
 
-// Scroll a textarea so the character at `idx` is centered in view
 function scrollTextareaToIndex(ta: HTMLTextAreaElement, idx: number) {
-  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
-  const lines = ta.value.slice(0, idx).split('\n').length - 1;
-  ta.scrollTop = Math.max(0, lines * lineHeight - ta.clientHeight / 3);
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+  const before = ta.value.slice(0, idx);
+  const lineIndex = Math.max(0, before.split('\n').length - 1);
+  const cursorMidY = lineIndex * lh + lh / 2;
+  ta.scrollTop = Math.max(0, cursorMidY - ta.clientHeight / 2);
 }
 
-// Inject <mark> highlights into the markdown preview pane and scroll to first match
-function highlightPreviewPane(query: string, container: Element | null) {
-  if (!container) return;
-  const preview = container.querySelector('.wmde-markdown');
-  if (!preview) return;
+/** 代码块 / 行内代码 / pre 内的文字不参与正文搜索高亮 */
+function inSkippableContext(textNode: Text, boundary: Element): boolean {
+  let el: Element | null = textNode.parentElement;
+  while (el && el !== boundary) {
+    const tag = el.tagName;
+    if (tag === 'SCRIPT' || tag === 'STYLE') return true;
+    if (tag === 'CODE') return true;
+    if (tag === 'PRE') return true;
+    const cls = typeof el.className === 'string' ? el.className : '';
+    if (/\btoken\.(code|code-block)\b/.test(cls)) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
 
-  // Remove old highlights
-  preview.querySelectorAll('mark.editor-search-hl').forEach((m) => {
-    const parent = m.parentNode;
-    if (parent) {
-      parent.replaceChild(document.createTextNode(m.textContent ?? ''), m);
-      parent.normalize();
-    }
+function injectSearchMarksIntoRoot(root: Element, query: string, rejectTextNode: (t: Text) => boolean): Element | null {
+  root.querySelectorAll('mark.editor-search-hl').forEach((m) => {
+    m.replaceWith(document.createTextNode(m.textContent ?? ''));
   });
+  root.normalize();
 
-  if (!query) return;
+  const q = query.trim();
+  if (!q) return null;
 
-  const lowerQ = query.toLowerCase();
-  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      const tag = (node.parentElement?.tagName ?? '').toUpperCase();
-      if (['SCRIPT', 'STYLE', 'MARK', 'CODE'].includes(tag)) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    },
+  let re: RegExp;
+  try {
+    re = new RegExp(escapeRegExp(q), 'gi');
+  } catch {
+    return null;
+  }
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => (rejectTextNode(node as Text) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
 
   const textNodes: Text[] = [];
-  let n: Node | null;
-  while ((n = walker.nextNode())) textNodes.push(n as Text);
+  let wn: Node | null;
+  while ((wn = walker.nextNode())) textNodes.push(wn as Text);
 
   let firstMark: Element | null = null;
-
   for (const tn of textNodes) {
     const text = tn.textContent ?? '';
-    const lower = text.toLowerCase();
-    if (!lower.includes(lowerQ)) continue;
+    const matches = [...text.matchAll(re)];
+    if (!matches.length) continue;
 
     const frag = document.createDocumentFragment();
     let last = 0;
-    let pos = lower.indexOf(lowerQ, 0);
-
-    while (pos !== -1) {
-      if (pos > last) frag.appendChild(document.createTextNode(text.slice(last, pos)));
+    for (const m of matches) {
+      const mi = m.index ?? 0;
+      if (mi > last) frag.appendChild(document.createTextNode(text.slice(last, mi)));
       const mark = document.createElement('mark');
       mark.className = 'editor-search-hl';
-      mark.textContent = text.slice(pos, pos + query.length);
+      mark.textContent = m[0];
       frag.appendChild(mark);
       if (!firstMark) firstMark = mark;
-      last = pos + query.length;
-      pos = lower.indexOf(lowerQ, last);
+      last = mi + m[0].length;
     }
     if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
     tn.parentNode?.replaceChild(frag, tn);
   }
+  return firstMark;
+}
 
-  firstMark?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+function findFirstMatchIndex(text: string, needle: string): number {
+  const q = needle.trim();
+  if (!q) return -1;
+  let idx = text.indexOf(q);
+  if (idx >= 0) return idx;
+  const nt = text.normalize('NFKC').toLowerCase();
+  const nq = q.normalize('NFKC').toLowerCase();
+  idx = nt.indexOf(nq);
+  return idx;
 }
 
 export function Editor() {
@@ -126,9 +144,30 @@ export function Editor() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const plainMirrorRef = useRef<HTMLPreElement>(null);
+  const searchScrollKeyRef = useRef<string>('');
 
   const isMarkdown = sheet?.type === 'markdown';
   const isCode = sheet?.type === 'code';
+
+  const plainSearchParts = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return null;
+    try {
+      return content.split(new RegExp(`(${escapeRegExp(q)})`, 'gi'));
+    } catch {
+      return null;
+    }
+  }, [content, searchQuery]);
+
+  const syncPlainMirrorScroll = useCallback(() => {
+    const ta = textareaRef.current;
+    const m = plainMirrorRef.current;
+    if (ta && m) {
+      m.scrollTop = ta.scrollTop;
+      m.scrollLeft = ta.scrollLeft;
+    }
+  }, []);
 
   // Sync local state when switching sheets
   useEffect(() => {
@@ -136,47 +175,72 @@ export function Editor() {
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
-  // Jump to search match when opening a document from search results
-  useEffect(() => {
-    if (!searchQuery || !sheet) return;
+  // Markdown / 预览：注入全部黄色高亮（随正文编辑刷新）
+  useLayoutEffect(() => {
+    const root = editorContainerRef.current;
+    if (!root || !sheet || !isMarkdown) return;
 
-    const jumpToMatch = () => {
-      const text = sheet.content;
-      const lower = text.toLowerCase();
-      const idx = lower.indexOf(searchQuery.toLowerCase());
-      if (idx === -1) return;
-      const endIdx = idx + searchQuery.length;
+    const q = searchQuery.trim();
 
+    if (preferences.showPreview) {
+      const preview = root.querySelector('.wmde-markdown');
+      if (preview) {
+        injectSearchMarksIntoRoot(preview, q, (t) => inSkippableContext(t, preview));
+      }
+    }
+
+    const pre = root.querySelector('.w-md-editor-text-pre');
+    if (pre) {
+      injectSearchMarksIntoRoot(pre as Element, q, (t) => inSkippableContext(t, pre as Element));
+    }
+  }, [content, searchQuery, sheet, isMarkdown, preferences.showPreview]);
+
+  // 切换文档或搜索词变化时：滚动到第一处匹配（避免每次输入内容时重滚）
+  useLayoutEffect(() => {
+    const root = editorContainerRef.current;
+    if (!root || !sheet) return;
+
+    const q = searchQuery.trim();
+    if (!q) {
+      searchScrollKeyRef.current = '';
+      return;
+    }
+
+    const key = `${sheet.id}\0${q}`;
+    if (searchScrollKeyRef.current === key) return;
+    searchScrollKeyRef.current = key;
+
+    const run = () => {
       if (isMarkdown) {
-        // Highlight in preview pane (if visible)
-        highlightPreviewPane(searchQuery, editorContainerRef.current);
-        // Select in edit pane
-        const ta = editorContainerRef.current?.querySelector(
-          '.w-md-editor-text-input'
-        ) as HTMLTextAreaElement | null;
-        if (ta) {
-          ta.setSelectionRange(idx, endIdx);
-          scrollTextareaToIndex(ta, idx);
+        if (preferences.showPreview) {
+          const first = root.querySelector('.wmde-markdown mark.editor-search-hl');
+          first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        const ta = root.querySelector('.w-md-editor-text-input') as HTMLTextAreaElement | null;
+        const hasPreviewMark = !!root.querySelector('.wmde-markdown mark.editor-search-hl');
+        if (ta && (!preferences.showPreview || !hasPreviewMark)) {
+          const idx = findFirstMatchIndex(ta.value, q);
+          if (idx >= 0) scrollTextareaToIndex(ta, idx);
         }
       } else if (!isCode && textareaRef.current) {
         const ta = textareaRef.current;
-        ta.setSelectionRange(idx, endIdx);
-        scrollTextareaToIndex(ta, idx);
+        const idx = findFirstMatchIndex(ta.value, q);
+        if (idx >= 0) scrollTextareaToIndex(ta, idx);
       }
     };
 
-    // Delay slightly so the editor DOM is ready after sheet switch
-    const t = setTimeout(jumpToMatch, 200);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet?.id, searchQuery]);
-
-  // Clear preview highlights when search is cleared
-  useEffect(() => {
-    if (!searchQuery) {
-      highlightPreviewPane('', editorContainerRef.current);
+    if (isMarkdown) {
+      requestAnimationFrame(() => requestAnimationFrame(run));
+    } else {
+      run();
     }
-  }, [searchQuery]);
+  }, [sheet?.id, searchQuery, isMarkdown, isCode, preferences.showPreview]);
+
+  // 纯文本：搜索高亮层与 textarea 滚动同步
+  useEffect(() => {
+    if (!plainSearchParts) return;
+    syncPlainMirrorScroll();
+  }, [plainSearchParts, content, syncPlainMirrorScroll]);
 
   // Apply line-height and letter-spacing CSS variables
   useEffect(() => {
@@ -238,16 +302,29 @@ export function Editor() {
     save(title, newContent);
   };
 
-  // Typewriter mode: keep cursor line centered in textarea
-  const handleTextareaKeyUp = useCallback(() => {
-    if (!preferences.typewriterMode || !textareaRef.current) return;
-    const ta = textareaRef.current;
-    const lineHeight = parseInt(getComputedStyle(ta).lineHeight) || 28;
-    const lines = ta.value.slice(0, ta.selectionStart).split('\n').length;
-    const cursorY = lines * lineHeight;
-    const targetScroll = cursorY - ta.clientHeight / 2;
-    ta.scrollTop = Math.max(0, targetScroll);
-  }, [preferences.typewriterMode]);
+  const applyTypewriterScroll = useCallback((ta: HTMLTextAreaElement) => {
+    if (preferences.editorViewMode !== 'typewriter') return;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    const before = ta.value.slice(0, ta.selectionStart);
+    const lineIndex = Math.max(0, before.split('\n').length - 1);
+    const cursorMidY = lineIndex * lh + lh / 2;
+    ta.scrollTop = Math.max(0, cursorMidY - ta.clientHeight / 2);
+    const mirror = plainMirrorRef.current;
+    if (mirror) mirror.scrollTop = ta.scrollTop;
+  }, [preferences.editorViewMode]);
+
+  // Typewriter：切换文档或模式后把光标行滚到中部
+  useLayoutEffect(() => {
+    if (preferences.editorViewMode !== 'typewriter' || !sheet) return;
+    if (isMarkdown) {
+      const ta = editorContainerRef.current?.querySelector('.w-md-editor-text-input') as HTMLTextAreaElement | null;
+      if (ta) requestAnimationFrame(() => applyTypewriterScroll(ta));
+      return;
+    }
+    if (!isCode && textareaRef.current) {
+      requestAnimationFrame(() => applyTypewriterScroll(textareaRef.current!));
+    }
+  }, [sheet?.id, preferences.editorViewMode, isMarkdown, isCode, applyTypewriterScroll]);
 
   // Insert markdown formatting at cursor
   const insertMarkdown = useCallback((before: string, after: string = '', placeholder = '') => {
@@ -266,11 +343,12 @@ export function Editor() {
         start + before.length,
         newCursor
       );
+      applyTypewriterScroll(ta);
     });
-  }, [handleContentChange]);
+  }, [handleContentChange, applyTypewriterScroll]);
 
   const togglePreview = () => updatePreferences({ showPreview: !preferences.showPreview });
-  const toggleFocusMode = () => updatePreferences({ focusMode: !preferences.focusMode });
+  const setEditorViewMode = (editorViewMode: EditorViewMode) => updatePreferences({ editorViewMode });
   const toggleFullscreen = () => updatePreferences({ fullscreen: !preferences.fullscreen });
   const toggleFormattingBar = () => updatePreferences({ formattingBarCollapsed: !preferences.formattingBarCollapsed });
 
@@ -293,7 +371,7 @@ export function Editor() {
     if (!sheet) return null;
     switch (sheet.type) {
       case 'code': return <LanguageIcon language={sheet.language} size={16} />;
-      case 'markdown': return <FileType size={14} />;
+      case 'markdown': return <MarkdownMIcon className="toolbar-md-icon" />;
       default: return <File size={14} />;
     }
   }, [sheet]);
@@ -320,10 +398,11 @@ export function Editor() {
   const showFormattingBar = isMarkdown && !preferences.formattingBarCollapsed;
   const chineseCount = liveWordCount.chinese;
   const englishCount = liveWordCount.english;
+  const viewMode = preferences.editorViewMode;
 
   return (
     <div
-      className={`editor-container${preferences.focusMode ? ' focus-mode' : ''}${preferences.fullscreen ? ' fullscreen-editor' : ''}${preferences.typewriterMode ? ' typewriter-mode' : ''}`}
+      className={`editor-container${viewMode === 'focus' ? ' focus-mode' : ''}${preferences.fullscreen ? ' fullscreen-editor' : ''}${viewMode === 'typewriter' ? ' typewriter-mode' : ''}`}
       ref={editorContainerRef}
     >
       {/* Info toolbar */}
@@ -353,14 +432,14 @@ export function Editor() {
               已保存
             </span>
           )}
-          {preferences.focusMode && (
-            <span className="focus-badge">
-              <AlertCircle size={12} />
-              专注模式
+          {viewMode === 'focus' && (
+            <span className="focus-badge" title="专注模式：弱化工具栏与边距，突出正文">
+              <Focus size={12} />
+              专注
             </span>
           )}
-          {preferences.typewriterMode && (
-            <span className="focus-badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
+          {viewMode === 'typewriter' && (
+            <span className="focus-badge focus-badge--muted" title="打字机模式：当前编辑行保持在视区中部">
               <Type size={12} />
               打字机
             </span>
@@ -385,13 +464,32 @@ export function Editor() {
               {preferences.showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
             </button>
           )}
-          <button
-            className={`toolbar-btn ${preferences.focusMode ? 'active' : ''}`}
-            onClick={toggleFocusMode}
-            title={preferences.focusMode ? '退出专注模式' : '专注模式'}
-          >
-            {preferences.focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
+          <div className="editor-mode-switch" title="专注：界面极简；打字机：光标行居中">
+            <button
+              type="button"
+              className={`mode-chip${viewMode === 'default' ? ' active' : ''}`}
+              onClick={() => setEditorViewMode('default')}
+            >
+              <LayoutTemplate size={14} />
+              <span>默认</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-chip${viewMode === 'focus' ? ' active' : ''}`}
+              onClick={() => setEditorViewMode('focus')}
+            >
+              <Focus size={14} />
+              <span>专注</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-chip${viewMode === 'typewriter' ? ' active' : ''}`}
+              onClick={() => setEditorViewMode('typewriter')}
+            >
+              <Type size={14} />
+              <span>打字机</span>
+            </button>
+          </div>
           <button
             className={`toolbar-btn ${preferences.fullscreen ? 'active' : ''}`}
             onClick={toggleFullscreen}
@@ -460,6 +558,10 @@ export function Editor() {
             highlightEnable={true}
             textareaProps={{
               placeholder: '开始写作...',
+              onInput: (e) => applyTypewriterScroll(e.currentTarget as HTMLTextAreaElement),
+              onKeyUp: (e) => applyTypewriterScroll(e.currentTarget as HTMLTextAreaElement),
+              onClick: (e) => applyTypewriterScroll(e.currentTarget as HTMLTextAreaElement),
+              onSelect: (e) => applyTypewriterScroll(e.currentTarget as HTMLTextAreaElement),
             }}
           />
         </div>
@@ -475,15 +577,47 @@ export function Editor() {
         </div>
       ) : (
         <div className="editor-content-plain">
-          <textarea
-            ref={textareaRef}
-            className="editor-textarea"
-            placeholder="开始写作..."
-            value={content}
-            onChange={handleTextareaChange}
-            onKeyUp={handleTextareaKeyUp}
-            spellCheck
-          />
+          {plainSearchParts ? (
+            <div className="editor-plain-stack">
+              <pre
+                ref={plainMirrorRef}
+                className="editor-plain-mirror"
+                aria-hidden
+              >
+                {plainSearchParts.map((part, i) =>
+                  i % 2 === 1 ? (
+                    <mark key={i} className="editor-search-hl">{part}</mark>
+                  ) : (
+                    part
+                  )
+                )}
+              </pre>
+              <textarea
+                ref={textareaRef}
+                className="editor-textarea editor-textarea--search-underlay"
+                placeholder="开始写作..."
+                value={content}
+                onChange={handleTextareaChange}
+                onKeyUp={(e) => applyTypewriterScroll(e.currentTarget)}
+                onInput={(e) => applyTypewriterScroll(e.currentTarget)}
+                onSelect={(e) => applyTypewriterScroll(e.currentTarget)}
+                onScroll={syncPlainMirrorScroll}
+                spellCheck
+              />
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              className="editor-textarea"
+              placeholder="开始写作..."
+              value={content}
+              onChange={handleTextareaChange}
+              onKeyUp={(e) => applyTypewriterScroll(e.currentTarget)}
+              onInput={(e) => applyTypewriterScroll(e.currentTarget)}
+              onSelect={(e) => applyTypewriterScroll(e.currentTarget)}
+              spellCheck
+            />
+          )}
         </div>
       )}
 

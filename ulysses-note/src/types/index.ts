@@ -51,6 +51,9 @@ export interface Group {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+/** 默认：完整界面；专注：弱化工具栏与标题栏干扰；打字机：当前行保持在视区中部 */
+export type EditorViewMode = 'default' | 'focus' | 'typewriter';
+
 export interface AppPreferences {
   theme: ThemeMode;
   sidebarWidth: number;
@@ -59,9 +62,8 @@ export interface AppPreferences {
   lineHeight: number;
   letterSpacing: number;
   showPreview: boolean;
-  focusMode: boolean;
+  editorViewMode: EditorViewMode;
   showWordCount: boolean;
-  typewriterMode: boolean;
   sidebarCollapsed: boolean;
   toolbarCollapsed: boolean;
   formattingBarCollapsed: boolean;

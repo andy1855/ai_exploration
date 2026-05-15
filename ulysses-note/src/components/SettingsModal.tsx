@@ -1,7 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space } from 'lucide-react';
 import { useNoteStore } from '../store/useNoteStore';
 import type { ThemeMode } from '../types';
+import {
+  bindLocalDataDirectory,
+  flushCurrentNotesToDisk,
+  isUsingLocalDirectory,
+  persistNotes,
+  unbindLocalDataDirectory,
+} from '../storage/notePersistence';
 
 interface Props {
   onClose: () => void;
@@ -30,7 +37,7 @@ const LETTER_SPACINGS = [0, 0.5, 1, 1.5, 2];
 
 const SHORTCUTS = [
   { keys: '⌘ S / Ctrl S', desc: '保存文档' },
-  { keys: '⌘ F / Ctrl F', desc: '搜索文稿' },
+  { keys: '⌘ F / Ctrl F', desc: '全局搜索（回车执行搜索）' },
   { keys: '⌘ B / Ctrl B', desc: '加粗（Markdown）' },
   { keys: '⌘ I / Ctrl I', desc: '斜体（Markdown）' },
   { keys: '⌘ K / Ctrl K', desc: '插入链接（Markdown）' },
@@ -44,6 +51,13 @@ const SHORTCUTS = [
 export function SettingsModal({ onClose }: Props) {
   const { preferences, updatePreferences } = useNoteStore();
   const [activeTab, setActiveTab] = useState<Tab>('appearance');
+  const [dataHint, setDataHint] = useState('');
+  const [usingLocalDir, setUsingLocalDir] = useState(() => isUsingLocalDirectory());
+
+  useEffect(() => {
+    setUsingLocalDir(isUsingLocalDirectory());
+    setDataHint('');
+  }, []);
 
   const setTheme = (theme: ThemeMode) => {
     updatePreferences({ theme });
@@ -83,8 +97,8 @@ export function SettingsModal({ onClose }: Props) {
   ];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+      <div className="modal-content modal-panel settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-title">
             <Sliders size={18} />
@@ -144,20 +158,15 @@ export function SettingsModal({ onClose }: Props) {
               </section>
 
               <section className="settings-section">
-                <h4 className="settings-section-title">编辑模式</h4>
-                <div className="settings-item settings-item-row">
-                  <div className="settings-item-label">
-                    <Type size={15} />
-                    <span>打字机模式</span>
-                    <span className="settings-desc">保持光标行居中</span>
-                  </div>
-                  <button
-                    className={`toggle-btn ${preferences.typewriterMode ? 'on' : 'off'}`}
-                    onClick={() => updatePreferences({ typewriterMode: !preferences.typewriterMode })}
-                  >
-                    <span className="toggle-thumb" />
-                  </button>
-                </div>
+                <h4 className="settings-section-title">编辑视图</h4>
+                <p className="settings-prose">
+                  <strong>默认</strong>显示完整工具栏与标题；<strong>专注</strong>弱化边距与工具栏，突出正文；
+                  <strong>打字机</strong>让当前行大致保持在编辑区垂直中央，适合长文连续输入。三种模式可在编辑器右上角快速切换。
+                </p>
+              </section>
+
+              <section className="settings-section">
+                <h4 className="settings-section-title">其他</h4>
                 <div className="settings-item settings-item-row">
                   <div className="settings-item-label">
                     <Hash size={15} />
@@ -279,7 +288,56 @@ export function SettingsModal({ onClose }: Props) {
           {/* ── Data tab ── */}
           {activeTab === 'data' && (
             <section className="settings-section">
-              <h4 className="settings-section-title">数据管理</h4>
+              <h4 className="settings-section-title">本地目录</h4>
+              <p className="settings-prose">
+                选择本机文件夹后，文稿会写入其中的 <code className="settings-inline-code">ulysses-note-data.json</code>。
+                需使用支持文件系统访问的 Chromium 内核浏览器（如 Chrome、Edge）。未选择时仍使用浏览器本地存储。
+              </p>
+              <div className={`settings-status-pill${usingLocalDir ? ' on' : ''}`}>
+                {usingLocalDir ? '当前：已绑定本地文件夹' : '当前：浏览器存储'}
+              </div>
+              <div className="settings-data-actions">
+                <button
+                  type="button"
+                  className="settings-action-btn primary"
+                  onClick={async () => {
+                    const r = await bindLocalDataDirectory();
+                    setDataHint(r.message);
+                    if (r.ok) {
+                      setUsingLocalDir(true);
+                      const { sheets, groups } = useNoteStore.getState();
+                      await persistNotes(sheets, groups);
+                    }
+                  }}
+                >
+                  选择本地数据目录…
+                </button>
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={async () => {
+                    const r = await flushCurrentNotesToDisk(() => useNoteStore.getState());
+                    setDataHint(r.message);
+                  }}
+                >
+                  立即保存到目录
+                </button>
+                <button
+                  type="button"
+                  className="settings-action-btn subtle"
+                  onClick={async () => {
+                    await unbindLocalDataDirectory();
+                    setUsingLocalDir(false);
+                    setDataHint('已解除文件夹绑定，此后写入浏览器存储。');
+                  }}
+                  disabled={!usingLocalDir}
+                >
+                  解除文件夹绑定
+                </button>
+              </div>
+              {dataHint && <p className="settings-data-message">{dataHint}</p>}
+
+              <h4 className="settings-section-title settings-section-title--spaced">备份</h4>
               <div className="settings-item settings-item-row">
                 <div className="settings-item-label">
                   <span>导出所有数据</span>
@@ -309,7 +367,7 @@ export function SettingsModal({ onClose }: Props) {
           )}
 
           <div className="settings-footer">
-            <span>Ulysses Note v1.1.0 · 数据存储于本地浏览器</span>
+            <span>Ulysses Note v1.1.0 · 文稿可存浏览器或自选本地文件夹</span>
           </div>
         </div>
       </div>

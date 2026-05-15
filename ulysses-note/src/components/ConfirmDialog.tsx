@@ -32,8 +32,8 @@ export function ConfirmDialog({
   }, [onCancel]);
 
   return (
-    <div className="modal-overlay confirm-overlay" onClick={onCancel}>
-      <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay modal-overlay--glass confirm-overlay" onClick={onCancel}>
+      <div className="modal-panel confirm-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="confirm-icon-wrap">
           {danger ? (
             <span className="confirm-icon danger"><Trash2 size={20} /></span>
