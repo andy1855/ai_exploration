@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { initNotePersistence, tryHydrateFromDisk, initialSync } from './storage/notePersistence';
+import { initNotePersistence, tryHydrateFromDisk, initialSync, loadNotesFromLocalStorage } from './storage/notePersistence';
 import { useNoteStore } from './store/useNoteStore';
 
 async function boot() {
@@ -16,14 +16,21 @@ async function boot() {
       selectedSheetId: fromDisk.sheets[0]?.id ?? null,
     });
   } else {
-    // 2) 无本地目录 → 尝试服务端同步（会回退到 localStorage）
-    const synced = await initialSync();
-    if (synced) {
-      useNoteStore.setState({
-        sheets: synced.sheets,
-        groups: synced.groups,
-        selectedSheetId: synced.sheets[0]?.id ?? null,
-      });
+    // 2) 无本地目录 → 尝试服务端同步（仅在已登录时）
+    const token = localStorage.getItem('lemon-token');
+    if (token) {
+      const synced = await initialSync();
+      if (synced) {
+        useNoteStore.setState({
+          sheets: synced.sheets,
+          groups: synced.groups,
+          selectedSheetId: synced.sheets[0]?.id ?? null,
+        });
+      }
+    } else {
+      // 3) 未登录 → 仅从 localStorage 加载
+      const local = loadNotesFromLocalStorage();
+      useNoteStore.setState({ sheets: local.sheets, groups: local.groups, selectedSheetId: local.sheets[0]?.id ?? null });
     }
   }
 
