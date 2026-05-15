@@ -144,4 +144,86 @@ router.put('/', (req: Request, res: Response): void => {
   res.json({ ok: true });
 });
 
+// ─── Version History ─────────────────────────────────
+
+// POST /api/notes/versions — 保存一个新版本快照
+router.post('/versions', (req: Request, res: Response): void => {
+  const userId = req.user!.userId;
+  const { sheetId, title, content, type, language, groupId, wordCount, chineseCount, englishCount } = req.body as {
+    sheetId: string;
+    title?: string;
+    content?: string;
+    type?: string;
+    language?: string | null;
+    groupId?: string | null;
+    wordCount?: number;
+    chineseCount?: number;
+    englishCount?: number;
+  };
+
+  if (!sheetId) { res.status(400).json({ error: '缺少 sheetId' }); return; }
+
+  db.prepare(`
+    INSERT INTO sheet_versions (sheet_id, user_id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sheetId, userId, title ?? '', content ?? '', type ?? 'plain',
+    language ?? null, groupId ?? null, wordCount ?? 0, chineseCount ?? 0, englishCount ?? 0,
+    Date.now()
+  );
+
+  // 每个 sheet 最多保留 10 个版本，删除最旧的
+  db.prepare(`
+    DELETE FROM sheet_versions WHERE id IN (
+      SELECT id FROM sheet_versions WHERE sheet_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET 10
+    )
+  `).run(sheetId);
+
+  res.json({ ok: true });
+});
+
+// GET /api/notes/versions/:sheetId — 获取某篇文稿的版本列表
+router.get('/versions/:sheetId', (req: Request, res: Response): void => {
+  const userId = req.user!.userId;
+  const { sheetId } = req.params;
+
+  const versions = db.prepare(`
+    SELECT id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at
+    FROM sheet_versions WHERE sheet_id = ? AND user_id = ?
+    ORDER BY created_at DESC LIMIT 10
+  `).all(sheetId, userId);
+
+  res.json({ versions });
+});
+
+// POST /api/notes/versions/restore/:versionId — 恢复到指定版本
+router.post('/versions/restore/:versionId', (req: Request, res: Response): void => {
+  const userId = req.user!.userId;
+  const versionId = Number(req.params.versionId);
+
+  const version = db.prepare(`
+    SELECT * FROM sheet_versions WHERE id = ? AND user_id = ?
+  `).get(versionId, userId) as {
+    id: number; sheet_id: string; title: string; content: string;
+    type: string; language: string | null; group_id: string | null;
+    word_count: number; chinese_count: number; english_count: number;
+  } | undefined;
+
+  if (!version) { res.status(404).json({ error: '版本不存在' }); return; }
+
+  // 将版本数据写回 sheets 表
+  db.prepare(`
+    UPDATE sheets SET
+      title = ?, content = ?, type = ?, language = ?, group_id = ?,
+      word_count = ?, chinese_count = ?, english_count = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `).run(
+    version.title, version.content, version.type, version.language, version.group_id,
+    version.word_count, version.chinese_count, version.english_count, Date.now(),
+    version.sheet_id, userId
+  );
+
+  res.json({ ok: true, sheetId: version.sheet_id });
+});
+
 export default router;

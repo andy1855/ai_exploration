@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, File } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useNoteStore } from '../store/useNoteStore';
 import type { Sheet } from '../types';
 import { textIncludesQuery, escapeRegExp } from '../utils/searchUtils';
@@ -170,17 +168,9 @@ export function GlobalSearchModal({ onClose }: Props) {
                   </button>
                 </div>
                 <div className="global-search-preview-content">
-                  {active.type === 'markdown' ? (
-                    <div className="wmde-markdown global-search-md" data-color-mode="inherit">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {snippet.slice(0, 6000)}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <pre className="global-search-plain">
-                      <HighlightInline text={snippet} query={appliedQuery} />
-                    </pre>
-                  )}
+                  <pre className="global-search-plain">
+                    <HighlightInline text={snippet} query={appliedQuery} />
+                  </pre>
                 </div>
               </>
             )}

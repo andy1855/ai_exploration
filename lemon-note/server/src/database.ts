@@ -79,8 +79,26 @@ db.exec(`
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS sheet_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    sheet_id   TEXT NOT NULL,
+    user_id    INTEGER NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    content    TEXT NOT NULL DEFAULT '',
+    type       TEXT NOT NULL DEFAULT 'plain',
+    language   TEXT,
+    group_id   TEXT,
+    word_count INTEGER NOT NULL DEFAULT 0,
+    chinese_count INTEGER NOT NULL DEFAULT 0,
+    english_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sheets_user ON sheets(user_id, updated_at);
   CREATE INDEX IF NOT EXISTS idx_groups_user ON note_groups(user_id);
+  CREATE INDEX IF NOT EXISTS idx_versions_sheet ON sheet_versions(sheet_id, created_at DESC);
 `);
 
 // Migrate: add device_info column if not exists

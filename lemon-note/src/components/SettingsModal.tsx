@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space, Download, Upload, RotateCcw } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space, Download, Upload, RotateCcw, Clock } from 'lucide-react';
 import { useNoteStore } from '../store/useNoteStore';
 import type { ThemeMode } from '../types';
 import {
@@ -341,18 +341,19 @@ export function SettingsModal({ onClose }: Props) {
               </div>
               {dataHint && <p className="settings-data-message">{dataHint}</p>}
 
-              <h4 className="settings-section-title settings-section-title--spaced">自动备份</h4>
+              <h4 className="settings-section-title settings-section-title--spaced">备份与恢复</h4>
               <p className="settings-prose">
-                每次编辑文稿时自动创建历史快照，最多保留 5 份。可导出为 JSON 文件长期保存。
+                编辑文稿时自动在服务端保存版本历史（每个文稿最近 10 个版本），同时本地也保留 5 份快照。
               </p>
 
               <div className="settings-backup-list">
                 {(() => {
                   const backups = getBackupList();
+                  const { sheets, groups } = useNoteStore.getState();
                   return (
                     <>
                       {backups.length === 0 && (
-                        <p className="settings-desc" style={{ marginBottom: 8 }}>暂无自动备份，编辑文稿后将自动生成。</p>
+                        <p className="settings-desc" style={{ marginBottom: 8 }}>暂无本地快照备份。编辑文稿后将自动生成。</p>
                       )}
                       {backups.map((b) => (
                         <div key={b.id} className="settings-backup-row">
@@ -361,11 +362,31 @@ export function SettingsModal({ onClose }: Props) {
                             <span className="settings-backup-time">
                               {new Date(b.timestamp).toLocaleString('zh-CN')}
                             </span>
+                            <span className="settings-backup-count">{b.sheets.length} 篇文稿</span>
                           </div>
                           <div className="settings-backup-actions">
                             <button
                               className="settings-action-btn compact"
-                              title="导出此备份"
+                              title="从此备份恢复"
+                              onClick={async () => {
+                                if (!confirm(`确定从此备份（${b.label}）恢复？将替换当前所有文稿。`)) return;
+                                useNoteStore.setState({
+                                  sheets: JSON.parse(JSON.stringify(b.sheets)),
+                                  groups: JSON.parse(JSON.stringify(b.groups)),
+                                });
+                                await notesApi.syncAll({
+                                  sheets: b.sheets,
+                                  groups: b.groups,
+                                });
+                                onClose();
+                              }}
+                            >
+                              <RotateCcw size={12} />
+                              恢复
+                            </button>
+                            <button
+                              className="settings-action-btn compact"
+                              title="导出此备份为 JSON 文件"
                               onClick={() => exportBackup(b)}
                             >
                               <Download size={12} />
@@ -380,8 +401,8 @@ export function SettingsModal({ onClose }: Props) {
 
               <div className="settings-item settings-item-row" style={{ marginTop: 12 }}>
                 <div className="settings-item-label">
-                  <span>从文件导入</span>
-                  <span className="settings-desc">选择之前导出的 JSON 备份文件</span>
+                  <span>从外部文件导入</span>
+                  <span className="settings-desc">选择之前导出的 JSON 备份文件，合并到当前文稿</span>
                 </div>
                 <input
                   ref={importFileRef}

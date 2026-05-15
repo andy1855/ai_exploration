@@ -28,12 +28,14 @@ import {
   Type,
   LayoutTemplate,
   Focus,
+  Clock,
 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 import { ConfirmDialog } from './ConfirmDialog';
 import { LanguageIcon } from '../utils/languageUtils';
 import { escapeRegExp } from '../utils/searchUtils';
 import { MarkdownMIcon } from './MarkdownMIcon';
+import { VersionHistory } from './VersionHistory';
 
 function formatWordCount(chinese: number, english: number): string {
   if (chinese > 0 && english > 0) return `${chinese} 字 · ${english} 词`;
@@ -140,6 +142,7 @@ export function Editor() {
   const [content, setContent] = useState(sheet?.content ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -467,6 +470,14 @@ export function Editor() {
               </span>
             </>
           )}
+          <button
+            className="toolbar-btn"
+            onClick={() => setShowVersionHistory(true)}
+            title="版本历史"
+            style={{ marginLeft: 6 }}
+          >
+            <Clock size={14} />
+          </button>
           {saveStatus === 'saving' && (
             <span className="save-status saving">
               <Loader2 size={11} className="save-spin" />
@@ -677,6 +688,12 @@ export function Editor() {
           danger
           onConfirm={() => { setShowDeleteConfirm(false); deleteSheet(selectedSheetId!); }}
           onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+      {showVersionHistory && selectedSheetId && (
+        <VersionHistory
+          sheetId={selectedSheetId}
+          onClose={() => setShowVersionHistory(false)}
         />
       )}
     </div>

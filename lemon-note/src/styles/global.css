@@ -1382,6 +1382,7 @@ a {
   min-width: 0;
   background: var(--bg-secondary);
   overflow: hidden;
+  position: relative;
 }
 
 .global-search-preview-empty {
@@ -1417,10 +1418,12 @@ a {
 
 .global-search-preview-content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 18px;
   font-size: 13px;
   line-height: 1.65;
+  min-height: 0;
 }
 
 .global-search-plain {
@@ -2426,6 +2429,65 @@ a {
   color: var(--accent);
 }
 
+/* ── Version History ── */
+.version-modal {
+  max-width: 520px;
+}
+
+.version-body {
+  max-height: min(480px, 60vh);
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.version-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.version-row:last-child { border-bottom: none; }
+
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.version-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.version-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.version-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.version-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-actions {
+  display: flex;
+  gap: 4px;
+}
+
 .logs-pager button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -2519,6 +2581,11 @@ a {
 .settings-backup-time {
   font-size: 11px;
   color: var(--text-tertiary);
+}
+
+.settings-backup-count {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .settings-backup-actions {

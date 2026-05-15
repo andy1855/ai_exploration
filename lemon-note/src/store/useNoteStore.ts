@@ -4,6 +4,7 @@ import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode } from '..
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
+import { notesApi } from '../api/notes';
 
 const PREFS_KEY = 'lemon-note-preferences';
 
@@ -143,6 +144,14 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     updateSheet: (id, updates) => {
+      // 内容变更时，先保存旧版本到服务器
+      if (updates.content !== undefined) {
+        const old = get().sheets.find((s) => s.id === id);
+        if (old && old.content !== updates.content) {
+          notesApi.saveVersion(old).catch(() => {});
+        }
+      }
+
       set((state) => {
         const sheets = state.sheets.map((s) => {
           if (s.id !== id) return s;
