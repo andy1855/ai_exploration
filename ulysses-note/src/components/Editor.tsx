@@ -13,10 +13,32 @@ import {
   File,
   Check,
   Loader2,
+  ChevronDown,
+  ChevronUp,
+  Bold,
+  Italic,
+  Code,
+  Link,
+  List,
+  ListOrdered,
+  Quote,
+  Minus,
+  Heading1,
+  Heading2,
+  Heading3,
+  Strikethrough,
+  Type,
 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 import { ConfirmDialog } from './ConfirmDialog';
 import { LanguageIcon } from '../utils/languageUtils';
+
+function formatWordCount(chinese: number, english: number): string {
+  if (chinese > 0 && english > 0) return `${chinese} 字 · ${english} 词`;
+  if (chinese > 0) return `${chinese} 字`;
+  if (english > 0) return `${english} 词`;
+  return '0 字';
+}
 
 export function Editor() {
   const {
@@ -25,7 +47,6 @@ export function Editor() {
     preferences,
     updateSheet,
     deleteSheet,
-    selectSheet,
     updatePreferences,
   } = useNoteStore();
 
@@ -40,13 +61,21 @@ export function Editor() {
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
+  const isMarkdown = sheet?.type === 'markdown';
+  const isCode = sheet?.type === 'code';
+
   // Sync local state when switching sheets
   useEffect(() => {
     setTitle(sheet?.title ?? '');
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
-  // Flush save and show status
+  // Apply line-height and letter-spacing CSS variables
+  useEffect(() => {
+    document.documentElement.style.setProperty('--editor-line-height', String(preferences.lineHeight ?? 1.8));
+    document.documentElement.style.setProperty('--editor-letter-spacing', `${preferences.letterSpacing ?? 0}px`);
+  }, [preferences.lineHeight, preferences.letterSpacing]);
+
   const flushSave = useCallback((newTitle: string, newContent: string) => {
     if (!selectedSheetId) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -56,7 +85,7 @@ export function Editor() {
     savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
   }, [selectedSheetId, updateSheet]);
 
-  // Block Cmd/Ctrl+S to prevent browser save dialog; trigger immediate save instead
+  // Block Cmd/Ctrl+S
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -68,7 +97,6 @@ export function Editor() {
     return () => window.removeEventListener('keydown', handler);
   }, [flushSave, title, content]);
 
-  // Auto-save with debounce
   const save = useCallback(
     (newTitle: string, newContent: string) => {
       if (!selectedSheetId) return;
@@ -102,20 +130,47 @@ export function Editor() {
     save(title, newContent);
   };
 
-  const togglePreview = () => {
-    updatePreferences({ showPreview: !preferences.showPreview });
-  };
+  // Typewriter mode: keep cursor line centered in textarea
+  const handleTextareaKeyUp = useCallback(() => {
+    if (!preferences.typewriterMode || !textareaRef.current) return;
+    const ta = textareaRef.current;
+    const lineHeight = parseInt(getComputedStyle(ta).lineHeight) || 28;
+    const lines = ta.value.slice(0, ta.selectionStart).split('\n').length;
+    const cursorY = lines * lineHeight;
+    const targetScroll = cursorY - ta.clientHeight / 2;
+    ta.scrollTop = Math.max(0, targetScroll);
+  }, [preferences.typewriterMode]);
 
-  const toggleFocusMode = () => {
-    updatePreferences({ focusMode: !preferences.focusMode });
-  };
+  // Insert markdown formatting at cursor
+  const insertMarkdown = useCallback((before: string, after: string = '', placeholder = '') => {
+    const ta = editorContainerRef.current?.querySelector('.w-md-editor-text-input') as HTMLTextAreaElement
+      ?? textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? 0;
+    const end = ta.selectionEnd ?? 0;
+    const selected = ta.value.slice(start, end) || placeholder;
+    const newContent = ta.value.slice(0, start) + before + selected + after + ta.value.slice(end);
+    handleContentChange(newContent);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const newCursor = start + before.length + selected.length;
+      ta.setSelectionRange(
+        start + before.length,
+        newCursor
+      );
+    });
+  }, [handleContentChange]);
+
+  const togglePreview = () => updatePreferences({ showPreview: !preferences.showPreview });
+  const toggleFocusMode = () => updatePreferences({ focusMode: !preferences.focusMode });
+  const toggleFullscreen = () => updatePreferences({ fullscreen: !preferences.fullscreen });
+  const toggleFormattingBar = () => updatePreferences({ formattingBarCollapsed: !preferences.formattingBarCollapsed });
 
   const handleDelete = () => {
     if (!selectedSheetId) return;
     setShowDeleteConfirm(true);
   };
 
-  // Determine sheet type icon
   const typeIcon = useMemo(() => {
     if (!sheet) return null;
     switch (sheet.type) {
@@ -144,12 +199,16 @@ export function Editor() {
   }
 
   const isDark = preferences.theme === 'dark';
-  const isMarkdown = sheet.type === 'markdown';
-  const isCode = sheet.type === 'code';
+  const showFormattingBar = isMarkdown && !preferences.formattingBarCollapsed;
+  const chineseCount = sheet.chineseCount ?? 0;
+  const englishCount = sheet.englishCount ?? 0;
 
   return (
-    <div className={`editor-container ${preferences.focusMode ? 'focus-mode' : ''}`} ref={editorContainerRef}>
-      {/* Toolbar */}
+    <div
+      className={`editor-container${preferences.focusMode ? ' focus-mode' : ''}${preferences.fullscreen ? ' fullscreen-editor' : ''}${preferences.typewriterMode ? ' typewriter-mode' : ''}`}
+      ref={editorContainerRef}
+    >
+      {/* Info toolbar */}
       <div className="editor-toolbar">
         <div className="toolbar-left">
           {typeIcon}
@@ -160,7 +219,7 @@ export function Editor() {
             <>
               <span className="toolbar-divider">|</span>
               <span className="toolbar-wordcount">
-                {sheet.wordCount ?? 0} 字
+                {formatWordCount(chineseCount, englishCount)}
               </span>
             </>
           )}
@@ -182,8 +241,23 @@ export function Editor() {
               专注模式
             </span>
           )}
+          {preferences.typewriterMode && (
+            <span className="focus-badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
+              <Type size={12} />
+              打字机
+            </span>
+          )}
         </div>
         <div className="toolbar-right">
+          {isMarkdown && (
+            <button
+              className={`toolbar-btn${preferences.formattingBarCollapsed ? '' : ' active'}`}
+              onClick={toggleFormattingBar}
+              title={preferences.formattingBarCollapsed ? '展开快捷菜单栏' : '收起快捷菜单栏'}
+            >
+              {preferences.formattingBarCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            </button>
+          )}
           {isMarkdown && (
             <button
               className={`toolbar-btn ${preferences.showPreview ? 'active' : ''}`}
@@ -201,6 +275,16 @@ export function Editor() {
             {preferences.focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
           <button
+            className={`toolbar-btn ${preferences.fullscreen ? 'active' : ''}`}
+            onClick={toggleFullscreen}
+            title={preferences.fullscreen ? '退出全屏 (Esc)' : '全屏模式'}
+          >
+            {preferences.fullscreen
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            }
+          </button>
+          <button
             className="toolbar-btn danger"
             onClick={handleDelete}
             title="删除文稿"
@@ -209,6 +293,30 @@ export function Editor() {
           </button>
         </div>
       </div>
+
+      {/* Formatting toolbar (markdown only) */}
+      {showFormattingBar && (
+        <div className="formatting-bar">
+          <button className="fmt-btn" onClick={() => insertMarkdown('**', '**', '加粗文字')} title="加粗 (⌘B)"><Bold size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('*', '*', '斜体文字')} title="斜体 (⌘I)"><Italic size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('~~', '~~', '删除文字')} title="删除线"><Strikethrough size={14} /></button>
+          <div className="fmt-divider" />
+          <button className="fmt-btn" onClick={() => insertMarkdown('# ', '', '标题')} title="一级标题"><Heading1 size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('## ', '', '标题')} title="二级标题"><Heading2 size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('### ', '', '标题')} title="三级标题"><Heading3 size={14} /></button>
+          <div className="fmt-divider" />
+          <button className="fmt-btn" onClick={() => insertMarkdown('`', '`', '代码')} title="行内代码"><Code size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('\n```\n', '\n```\n', '代码块')} title="代码块">
+            <span className="fmt-text">```</span>
+          </button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('[', '](url)', '链接文字')} title="插入链接 (⌘K)"><Link size={14} /></button>
+          <div className="fmt-divider" />
+          <button className="fmt-btn" onClick={() => insertMarkdown('> ', '', '引用内容')} title="引用"><Quote size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('- ', '', '列表项')} title="无序列表"><List size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('1. ', '', '列表项')} title="有序列表"><ListOrdered size={14} /></button>
+          <button className="fmt-btn" onClick={() => insertMarkdown('\n---\n', '')} title="分割线"><Minus size={14} /></button>
+        </div>
+      )}
 
       {/* Title */}
       <div className="editor-title-area">
@@ -222,7 +330,7 @@ export function Editor() {
         />
       </div>
 
-      {/* Editor body — variant based on sheet type */}
+      {/* Editor body */}
       {isMarkdown ? (
         <div className="editor-content" data-color-mode={isDark ? 'dark' : 'light'}>
           <MDEditor
@@ -255,6 +363,7 @@ export function Editor() {
             placeholder="开始写作..."
             value={content}
             onChange={handleTextareaChange}
+            onKeyUp={handleTextareaKeyUp}
             spellCheck
           />
         </div>

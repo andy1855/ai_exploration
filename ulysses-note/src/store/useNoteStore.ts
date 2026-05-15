@@ -21,31 +21,48 @@ function saveData(sheets: Sheet[], groups: Group[]) {
 function loadPreferences(): AppPreferences {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      return { ...defaultPreferences, ...saved };
+    }
   } catch {}
-  return {
-    theme: 'light',
-    sidebarWidth: 280,
-    editorFontSize: 16,
-    editorFontFamily: 'system',
-    showPreview: true,
-    focusMode: false,
-    showWordCount: true,
-  };
+  return { ...defaultPreferences };
 }
+
+const defaultPreferences: AppPreferences = {
+  theme: 'light',
+  sidebarWidth: 280,
+  editorFontSize: 16,
+  editorFontFamily: 'system',
+  lineHeight: 1.8,
+  letterSpacing: 0,
+  showPreview: true,
+  focusMode: false,
+  showWordCount: true,
+  typewriterMode: false,
+  sidebarCollapsed: false,
+  toolbarCollapsed: false,
+  formattingBarCollapsed: false,
+  fullscreen: false,
+};
 
 function savePreferences(prefs: AppPreferences) {
   localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
 
-function countWords(text: string): number {
+interface WordCount {
+  chinese: number;
+  english: number;
+  total: number;
+}
+
+function countWords(text: string): WordCount {
   const cleaned = text.replace(/[#*`~\[\]()>|\\]/g, '').trim();
-  if (!cleaned) return 0;
-  // Count Chinese characters + English words
-  const chineseChars = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const englishText = cleaned.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
-  const englishWords = englishText.split(/\s+/).filter(Boolean).length;
-  return chineseChars + englishWords;
+  if (!cleaned) return { chinese: 0, english: 0, total: 0 };
+  const chineseChars = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf\u{20000}-\u{2a6df}]/gu) || []).length;
+  const withoutChinese = cleaned.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
+  const englishWords = withoutChinese.split(/\s+/).filter((w) => /[a-zA-Z0-9]/.test(w)).length;
+  return { chinese: chineseChars, english: englishWords, total: chineseChars + englishWords };
 }
 
 interface NoteState {
@@ -111,6 +128,8 @@ export const useNoteStore = create<NoteState>((set, get) => {
         type,
         language: language ?? null,
         wordCount: 0,
+        chineseCount: 0,
+        englishCount: 0,
       };
       set((state) => {
         const sheets = [newSheet, ...state.sheets];
@@ -130,7 +149,10 @@ export const useNoteStore = create<NoteState>((set, get) => {
             updatedAt: Date.now(),
           };
           if (updates.content !== undefined) {
-            updated.wordCount = countWords(updates.content);
+            const wc = countWords(updates.content);
+            updated.wordCount = wc.total;
+            updated.chineseCount = wc.chinese;
+            updated.englishCount = wc.english;
           }
           return updated;
         });

@@ -11,6 +11,8 @@ export interface Sheet {
   language?: string | null;
   pinned?: boolean;
   wordCount?: number;
+  chineseCount?: number;
+  englishCount?: number;
 }
 
 export const CODE_LANGUAGES = [
@@ -54,7 +56,14 @@ export interface AppPreferences {
   sidebarWidth: number;
   editorFontSize: number;
   editorFontFamily: string;
+  lineHeight: number;
+  letterSpacing: number;
   showPreview: boolean;
   focusMode: boolean;
   showWordCount: boolean;
+  typewriterMode: boolean;
+  sidebarCollapsed: boolean;
+  toolbarCollapsed: boolean;
+  formattingBarCollapsed: boolean;
+  fullscreen: boolean;
 }

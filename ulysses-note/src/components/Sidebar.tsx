@@ -9,31 +9,46 @@ import {
   ChevronRight,
   ChevronDown,
   Search,
-  Sun,
-  Moon,
-  ListMusic,
   File,
-  Settings,
-  LogOut,
-  Shield,
   Pencil,
   FilePlus,
   FolderPlus,
   Copy,
-  UserCog,
   CheckSquare,
   Square,
   X,
   MoveRight,
+  Layers,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
-import { SettingsModal } from './SettingsModal';
-import { LoginLogsPanel } from './AuthModal';
-import { AccountPanel } from './AccountPanel';
 import { LanguageIcon } from '../utils/languageUtils';
-import { useAuthStore } from '../store/useAuthStore';
 import { ContextMenu, useContextMenu } from './ContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
+
+// ─── Highlight helper ─────────────────────────────────────────
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="search-highlight">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+function getContentSnippet(content: string, query: string): string {
+  const lower = content.toLowerCase();
+  const idx = lower.indexOf(query.toLowerCase());
+  if (idx === -1) return '';
+  const start = Math.max(0, idx - 20);
+  const end = Math.min(content.length, idx + query.length + 40);
+  const snippet = (start > 0 ? '…' : '') + content.slice(start, end) + (end < content.length ? '…' : '');
+  return snippet.replace(/\n/g, ' ');
+}
 
 // ─── MoveToModal ─────────────────────────────────────────────
 interface MoveToModalProps {
@@ -97,20 +112,17 @@ export function Sidebar() {
     updateGroup,
     copySheet,
     setSearchQuery,
-    updatePreferences,
   } = useNoteStore();
 
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const [showAccount, setShowAccount] = useState(false);
   const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  // Multi-select
+  // Multi-select & batch mode
+  const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [moveToIds, setMoveToIds] = useState<string[] | null>(null);
@@ -123,7 +135,6 @@ export function Sidebar() {
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null | 'root'>(undefined as unknown as null);
 
   const searchRef = useRef<HTMLInputElement>(null);
-  const { nickname, target, logout } = useAuthStore();
   const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu();
 
   const rootGroups = getChildGroups(null);
@@ -132,19 +143,22 @@ export function Sidebar() {
   const filteredSheets = isSearching ? getFilteredSheets() : null;
   const searchCount = filteredSheets?.length ?? 0;
 
+  // Exit batch mode when selection clears
+  useEffect(() => {
+    if (!batchMode) setSelectedIds(new Set());
+  }, [batchMode]);
+
   // Cmd+F to focus search
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e as unknown as globalThis.KeyboardEvent).metaKey || (e as unknown as globalThis.KeyboardEvent).ctrlKey) {
-        if ((e as unknown as globalThis.KeyboardEvent).key === 'f') {
-          (e as unknown as globalThis.KeyboardEvent).preventDefault();
-          searchRef.current?.focus();
-          searchRef.current?.select();
-        }
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
       }
     };
-    window.addEventListener('keydown', handler as unknown as EventListener);
-    return () => window.removeEventListener('keydown', handler as unknown as EventListener);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   const openCreateModal = (groupId?: string) => {
@@ -152,26 +166,27 @@ export function Sidebar() {
     setShowCreateModal(true);
   };
 
+  function toggleCheck(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   function toggleSelect(id: string, e: React.MouseEvent) {
-    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+    if (batchMode) {
+      toggleCheck(id);
+    } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
       e.preventDefault();
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.has(id) ? next.delete(id) : next.add(id);
-        return next;
-      });
-    } else if (selectedIds.size > 0) {
-      // Already in selection mode: toggle this item
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.has(id) ? next.delete(id) : next.add(id);
-        return next;
-      });
+      setBatchMode(true);
+      toggleCheck(id);
     }
   }
 
   function clearSelection() {
     setSelectedIds(new Set());
+    setBatchMode(false);
   }
 
   // Context menu helpers
@@ -196,11 +211,6 @@ export function Sidebar() {
     ]);
   };
 
-  const handleGroupDoubleClick = (group: { id: string; name: string }) => {
-    setEditingGroupId(group.id);
-    setEditName(group.name);
-  };
-
   const handleGroupNameSubmit = (groupId: string) => {
     if (editName.trim()) updateGroup(groupId, { name: editName.trim() });
     setEditingGroupId(null);
@@ -209,12 +219,6 @@ export function Sidebar() {
   const handleGroupNameKeyDown = (e: KeyboardEvent, groupId: string) => {
     if (e.key === 'Enter') handleGroupNameSubmit(groupId);
     if (e.key === 'Escape') setEditingGroupId(null);
-  };
-
-  const toggleTheme = () => {
-    const next = preferences.theme === 'light' ? 'dark' : 'light';
-    updatePreferences({ theme: next });
-    document.documentElement.setAttribute('data-theme', next);
   };
 
   // Drag & drop handlers
@@ -243,7 +247,6 @@ export function Sidebar() {
     setDragOverGroupId(undefined as unknown as null);
   };
 
-  // Confirm delete handler
   const handleConfirmDelete = () => {
     if (!deleteTarget) return;
     if (deleteTarget.id.startsWith('group:')) {
@@ -254,45 +257,12 @@ export function Sidebar() {
     setDeleteTarget(null);
   };
 
-  const currentTheme = preferences.theme;
+  if (preferences.sidebarCollapsed) {
+    return <aside className="sidebar sidebar-collapsed" />;
+  }
 
   return (
     <aside className="sidebar" style={{ width: preferences.sidebarWidth }}>
-      {/* Header */}
-      <div className="sidebar-header">
-        <div className="sidebar-title">
-          <ListMusic size={20} />
-          <span>Ulysses Note</span>
-        </div>
-        <div className="sidebar-header-actions">
-          <button className="icon-btn" onClick={toggleTheme} title={currentTheme === 'dark' ? '切换亮色' : '切换暗色'}>
-            {currentTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <button className="icon-btn" onClick={() => setShowSettings(true)} title="设置">
-            <Settings size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* User info bar */}
-      <div className="sidebar-user-bar">
-        <div className="user-bar-info">
-          <span className="user-bar-nickname">{nickname || target}</span>
-          <span className="user-bar-target">{nickname ? target : ''}</span>
-        </div>
-        <div className="user-bar-actions">
-          <button className="icon-btn" onClick={() => setShowAccount(true)} title="账户信息">
-            <UserCog size={14} />
-          </button>
-          <button className="icon-btn" onClick={() => setShowLogs(true)} title="登录记录">
-            <Shield size={14} />
-          </button>
-          <button className="icon-btn" onClick={logout} title="退出登录">
-            <LogOut size={14} />
-          </button>
-        </div>
-      </div>
-
       {/* Search */}
       <div className="sidebar-search">
         <Search size={14} className="search-icon" />
@@ -314,23 +284,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Batch actions bar */}
-      {selectedIds.size > 0 && (
-        <div className="batch-actions-bar">
-          <span className="batch-count">已选 {selectedIds.size} 篇</span>
-          <button className="batch-btn" onClick={() => setMoveToIds(Array.from(selectedIds))} title="移动到">
-            <MoveRight size={13} />
-          </button>
-          <button className="batch-btn danger" onClick={() => setBatchDeleteConfirm(true)} title="批量删除">
-            <Trash2 size={13} />
-          </button>
-          <button className="batch-btn" onClick={clearSelection} title="取消选择">
-            <X size={13} />
-          </button>
-        </div>
-      )}
-
-      {/* Quick actions */}
+      {/* Quick actions + batch mode toggle */}
       {!isSearching && (
         <div className="sidebar-actions">
           <button className="action-btn" onClick={() => openCreateModal()}>
@@ -339,48 +293,81 @@ export function Sidebar() {
           <button className="action-btn" onClick={() => createGroup('新建分组', null)}>
             <Folder size={14} /><span>新建分组</span>
           </button>
+          <button
+            className={`action-btn action-btn-icon${batchMode ? ' active' : ''}`}
+            onClick={() => setBatchMode(!batchMode)}
+            title="批量处理"
+          >
+            <Layers size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Batch actions bar */}
+      {batchMode && (
+        <div className="batch-actions-bar">
+          {selectedIds.size > 0 ? (
+            <>
+              <span className="batch-count">已选 {selectedIds.size} 篇</span>
+              <button className="batch-btn" onClick={() => setMoveToIds(Array.from(selectedIds))} title="移动到">
+                <MoveRight size={13} />
+              </button>
+              <button className="batch-btn danger" onClick={() => setBatchDeleteConfirm(true)} title="批量删除">
+                <Trash2 size={13} />
+              </button>
+            </>
+          ) : (
+            <span className="batch-count batch-hint">点击文稿勾选</span>
+          )}
+          <button className="batch-btn" onClick={clearSelection} title="退出批量模式">
+            <X size={13} />
+          </button>
         </div>
       )}
 
       {/* Search results */}
       {isSearching ? (
         <div className="sidebar-groups">
-          {filteredSheets!.map((sheet) => (
-            <SheetItem
-              key={sheet.id}
-              sheet={sheet}
-              isSelected={selectedSheetId === sheet.id}
-              isChecked={selectedIds.has(sheet.id)}
-              isDragging={draggingId === sheet.id}
-              renamingId={renamingSheetId}
-              renameValue={renameValue}
-              onSelect={(e) => {
-                if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
-                  toggleSelect(sheet.id, e);
-                } else {
-                  selectSheet(sheet.id);
-                }
-              }}
-              onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
-              onToggleCheck={() => {
-                setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  next.has(sheet.id) ? next.delete(sheet.id) : next.add(sheet.id);
-                  return next;
-                });
-              }}
-              onRenameChange={setRenameValue}
-              onRenameSubmit={() => {
-                if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
-                setRenamingSheetId(null);
-              }}
-              onRenameCancel={() => setRenamingSheetId(null)}
-              onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
-              onDragStart={(e) => handleDragStart(e, sheet.id)}
-              onDragEnd={handleDragEnd}
-              paddingLeft={12}
-            />
-          ))}
+          {filteredSheets!.map((sheet) => {
+            const titleMatch = sheet.title.toLowerCase().includes(searchQuery.toLowerCase());
+            const contentMatch = !titleMatch && sheet.content.toLowerCase().includes(searchQuery.toLowerCase());
+            const snippet = contentMatch ? getContentSnippet(sheet.content, searchQuery) : '';
+            return (
+              <SheetItem
+                key={sheet.id}
+                sheet={sheet}
+                isSelected={selectedSheetId === sheet.id}
+                isChecked={selectedIds.has(sheet.id)}
+                isDragging={draggingId === sheet.id}
+                batchMode={batchMode}
+                renamingId={renamingSheetId}
+                renameValue={renameValue}
+                searchQuery={searchQuery}
+                snippet={snippet}
+                onSelect={(e) => {
+                  if (batchMode) {
+                    toggleCheck(sheet.id);
+                  } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                    toggleSelect(sheet.id, e);
+                  } else {
+                    selectSheet(sheet.id);
+                  }
+                }}
+                onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
+                onToggleCheck={() => toggleCheck(sheet.id)}
+                onRenameChange={setRenameValue}
+                onRenameSubmit={() => {
+                  if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
+                  setRenamingSheetId(null);
+                }}
+                onRenameCancel={() => setRenamingSheetId(null)}
+                onDelete={() => setDeleteTarget({ id: sheet.id, title: sheet.title })}
+                onDragStart={(e) => handleDragStart(e, sheet.id)}
+                onDragEnd={handleDragEnd}
+                paddingLeft={12}
+              />
+            );
+          })}
           {filteredSheets!.length === 0 && (
             <div className="sidebar-empty"><p>未找到相关文稿</p></div>
           )}
@@ -396,29 +383,25 @@ export function Sidebar() {
               selectedSheetId={selectedSheetId}
               selectedGroupId={selectedGroupId}
               selectedIds={selectedIds}
+              batchMode={batchMode}
               draggingId={draggingId}
               dragOverGroupId={dragOverGroupId}
-              isEditing={editingGroupId === group.id}
+              editingGroupId={editingGroupId}
               editName={editName}
               renamingSheetId={renamingSheetId}
               renameValue={renameValue}
+              searchQuery=""
               onSelectGroup={() => selectGroup(group.id)}
               onSelectSheet={selectSheet}
               onToggleSelect={toggleSelect}
-              onToggleCheck={(id) => {
-                setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  next.has(id) ? next.delete(id) : next.add(id);
-                  return next;
-                });
-              }}
+              onToggleCheck={toggleCheck}
               onCreateSheetInGroup={(gid) => openCreateModal(gid)}
               onDeleteGroup={() => setDeleteTarget({ id: `group:${group.id}`, title: group.name })}
               onDeleteSheet={(id, title) => setDeleteTarget({ id, title })}
-              onStartEdit={() => handleGroupDoubleClick(group)}
               onEditNameChange={setEditName}
-              onSubmitEdit={() => handleGroupNameSubmit(group.id)}
-              onKeyDown={(e) => handleGroupNameKeyDown(e, group.id)}
+              onSubmitEdit={handleGroupNameSubmit}
+              onKeyDown={handleGroupNameKeyDown}
+              onSetEditingGroupId={setEditingGroupId}
               onContextMenuGroup={handleCtxGroup}
               onContextMenuSheet={handleCtxSheet}
               onRenameSheet={(id, title) => { setRenamingSheetId(id); setRenameValue(title); }}
@@ -453,23 +436,22 @@ export function Sidebar() {
                 isSelected={selectedSheetId === sheet.id}
                 isChecked={selectedIds.has(sheet.id)}
                 isDragging={draggingId === sheet.id}
+                batchMode={batchMode}
                 renamingId={renamingSheetId}
                 renameValue={renameValue}
+                searchQuery=""
+                snippet=""
                 onSelect={(e) => {
-                  if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                  if (batchMode) {
+                    toggleCheck(sheet.id);
+                  } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
                     toggleSelect(sheet.id, e);
                   } else {
                     selectSheet(sheet.id);
                   }
                 }}
                 onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
-                onToggleCheck={() => {
-                  setSelectedIds((prev) => {
-                    const next = new Set(prev);
-                    next.has(sheet.id) ? next.delete(sheet.id) : next.add(sheet.id);
-                    return next;
-                  });
-                }}
+                onToggleCheck={() => toggleCheck(sheet.id)}
                 onRenameChange={setRenameValue}
                 onRenameSubmit={() => {
                   if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
@@ -498,9 +480,6 @@ export function Sidebar() {
       {showCreateModal && (
         <CreateSheetModal groupId={createInGroupId} onClose={() => setShowCreateModal(false)} />
       )}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showLogs && <LoginLogsPanel onClose={() => setShowLogs(false)} />}
-      {showAccount && <AccountPanel onClose={() => setShowAccount(false)} />}
       {moveToIds && (
         <MoveToModal sheetIds={moveToIds} onClose={() => setMoveToIds(null)} onMoved={clearSelection} />
       )}
@@ -542,8 +521,11 @@ interface SheetItemProps {
   isSelected: boolean;
   isChecked: boolean;
   isDragging: boolean;
+  batchMode: boolean;
   renamingId: string | null;
   renameValue: string;
+  searchQuery: string;
+  snippet?: string;
   paddingLeft?: number;
   onSelect: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -561,8 +543,11 @@ function SheetItem({
   isSelected,
   isChecked,
   isDragging,
+  batchMode,
   renamingId,
   renameValue,
+  searchQuery,
+  snippet,
   paddingLeft = 12,
   onSelect,
   onContextMenu,
@@ -575,10 +560,11 @@ function SheetItem({
   onDragEnd,
 }: SheetItemProps) {
   const isRenaming = renamingId === sheet.id;
+  const hasSnippet = !!snippet;
 
   return (
     <div
-      className={`sheet-item ${isSelected ? 'active' : ''} ${isChecked ? 'checked' : ''} ${isDragging ? 'dragging' : ''}`}
+      className={`sheet-item ${isSelected ? 'active' : ''} ${isChecked ? 'checked' : ''} ${isDragging ? 'dragging' : ''} ${hasSnippet ? 'has-snippet' : ''}`}
       style={{ paddingLeft }}
       draggable
       onClick={onSelect}
@@ -586,30 +572,41 @@ function SheetItem({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <button
-        className="sheet-check-btn"
-        onClick={(e) => { e.stopPropagation(); onToggleCheck(); }}
-        title="选择"
-      >
-        {isChecked ? <CheckSquare size={13} /> : <Square size={13} />}
-      </button>
-      <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
-      {isRenaming ? (
-        <input
-          className="sheet-rename-input"
-          value={renameValue}
-          autoFocus
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => onRenameChange(e.target.value)}
-          onBlur={onRenameSubmit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onRenameSubmit();
-            if (e.key === 'Escape') onRenameCancel();
-          }}
-        />
-      ) : (
-        <span className="sheet-title">{sheet.title || '未命名文稿'}</span>
+      {batchMode && (
+        <button
+          className="sheet-check-btn"
+          onClick={(e) => { e.stopPropagation(); onToggleCheck(); }}
+          title="选择"
+        >
+          {isChecked ? <CheckSquare size={13} /> : <Square size={13} />}
+        </button>
       )}
+      <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
+      <div className="sheet-info">
+        {isRenaming ? (
+          <input
+            className="sheet-rename-input"
+            value={renameValue}
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onRenameChange(e.target.value)}
+            onBlur={onRenameSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onRenameSubmit();
+              if (e.key === 'Escape') onRenameCancel();
+            }}
+          />
+        ) : (
+          <span className="sheet-title">
+            <HighlightText text={sheet.title || '未命名文稿'} query={searchQuery} />
+          </span>
+        )}
+        {hasSnippet && (
+          <span className="sheet-snippet">
+            <HighlightText text={snippet!} query={searchQuery} />
+          </span>
+        )}
+      </div>
       {sheet.type === 'code' && sheet.language && (
         <span className="sheet-lang-badge">{sheet.language}</span>
       )}
@@ -630,12 +627,14 @@ interface GroupItemProps {
   selectedGroupId: string | null;
   selectedSheetId: string | null;
   selectedIds: Set<string>;
+  batchMode: boolean;
   draggingId: string | null;
   dragOverGroupId: string | null | undefined;
-  isEditing: boolean;
+  editingGroupId: string | null;
   editName: string;
   renamingSheetId: string | null;
   renameValue: string;
+  searchQuery: string;
   onSelectGroup: () => void;
   onSelectSheet: (id: string) => void;
   onToggleSelect: (id: string, e: React.MouseEvent) => void;
@@ -643,10 +642,10 @@ interface GroupItemProps {
   onCreateSheetInGroup: (groupId: string) => void;
   onDeleteGroup: () => void;
   onDeleteSheet: (id: string, title: string) => void;
-  onStartEdit: () => void;
   onEditNameChange: (name: string) => void;
-  onSubmitEdit: () => void;
-  onKeyDown: (e: KeyboardEvent) => void;
+  onSubmitEdit: (groupId: string) => void;
+  onKeyDown: (e: KeyboardEvent, groupId: string) => void;
+  onSetEditingGroupId: (id: string | null) => void;
   onContextMenuGroup?: (e: React.MouseEvent, groupId: string, groupName: string) => void;
   onContextMenuSheet?: (e: React.MouseEvent, sheetId: string, sheetTitle: string) => void;
   onRenameSheet: (id: string, title: string) => void;
@@ -667,11 +666,11 @@ function getSheetIcon(type?: string, language?: string | null) {
 
 function GroupItem({
   group, level, selectedGroupId, selectedSheetId, selectedIds,
-  draggingId, dragOverGroupId, isEditing, editName,
-  renamingSheetId, renameValue,
+  batchMode, draggingId, dragOverGroupId, editingGroupId, editName,
+  renamingSheetId, renameValue, searchQuery,
   onSelectGroup, onSelectSheet, onToggleSelect, onToggleCheck,
   onCreateSheetInGroup, onDeleteGroup, onDeleteSheet,
-  onStartEdit, onEditNameChange, onSubmitEdit, onKeyDown,
+  onEditNameChange, onSubmitEdit, onKeyDown, onSetEditingGroupId,
   onContextMenuGroup, onContextMenuSheet,
   onRenameSheet, onRenameChange, onRenameSubmit, onRenameCancel,
   onDragStart, onDragEnd, onGroupDragOver, onGroupDrop,
@@ -684,6 +683,7 @@ function GroupItem({
   const isSelected = selectedGroupId === group.id;
   const hasChildren = childGroups.length > 0 || childSheets.length > 0;
   const isDragOver = dragOverGroupId === group.id;
+  const isEditing = editingGroupId === group.id;
 
   const toggleCollapse = () => {
     const next = !collapsed;
@@ -713,13 +713,22 @@ function GroupItem({
             className="group-edit-input"
             value={editName}
             onChange={(e) => onEditNameChange(e.target.value)}
-            onBlur={onSubmitEdit}
-            onKeyDown={onKeyDown}
+            onBlur={() => onSubmitEdit(group.id)}
+            onKeyDown={(e) => onKeyDown(e as unknown as KeyboardEvent, group.id)}
             autoFocus
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="group-name" onDoubleClick={onStartEdit}>{group.name}</span>
+          <span
+            className="group-name"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onSetEditingGroupId(group.id);
+              onEditNameChange(group.name);
+            }}
+          >
+            {group.name}
+          </span>
         )}
         <div className="group-actions" onClick={(e) => e.stopPropagation()}>
           <button className="item-action-btn" onClick={() => onCreateSheetInGroup(group.id)} title="新建文稿">
@@ -741,12 +750,14 @@ function GroupItem({
               selectedGroupId={selectedGroupId}
               selectedSheetId={selectedSheetId}
               selectedIds={selectedIds}
+              batchMode={batchMode}
               draggingId={draggingId}
               dragOverGroupId={dragOverGroupId}
-              isEditing={false}
-              editName=""
+              editingGroupId={editingGroupId}
+              editName={editName}
               renamingSheetId={renamingSheetId}
               renameValue={renameValue}
+              searchQuery={searchQuery}
               onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
               onSelectSheet={onSelectSheet}
               onToggleSelect={onToggleSelect}
@@ -754,10 +765,10 @@ function GroupItem({
               onCreateSheetInGroup={onCreateSheetInGroup}
               onDeleteGroup={() => useNoteStore.getState().deleteGroup(cg.id)}
               onDeleteSheet={onDeleteSheet}
-              onStartEdit={() => {}}
-              onEditNameChange={() => {}}
-              onSubmitEdit={() => {}}
-              onKeyDown={() => {}}
+              onEditNameChange={onEditNameChange}
+              onSubmitEdit={onSubmitEdit}
+              onKeyDown={onKeyDown}
+              onSetEditingGroupId={onSetEditingGroupId}
               onContextMenuGroup={onContextMenuGroup}
               onContextMenuSheet={onContextMenuSheet}
               onRenameSheet={onRenameSheet}
@@ -777,10 +788,15 @@ function GroupItem({
               isSelected={selectedSheetId === sheet.id}
               isChecked={selectedIds.has(sheet.id)}
               isDragging={draggingId === sheet.id}
+              batchMode={batchMode}
               renamingId={renamingSheetId}
               renameValue={renameValue}
+              searchQuery={searchQuery}
+              snippet=""
               onSelect={(e) => {
-                if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
+                if (batchMode) {
+                  onToggleCheck(sheet.id);
+                } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
                   onToggleSelect(sheet.id, e);
                 } else {
                   onSelectSheet(sheet.id);
