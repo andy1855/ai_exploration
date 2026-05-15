@@ -30,7 +30,7 @@ export function AuthPage() {
   const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState('');
-  const [devCode, setDevCode] = useState('');
+  const [devCode, setDevCode] = useState<{ code: string; hint: string } | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function startCountdown() {
@@ -58,7 +58,7 @@ export function AuthPage() {
       setCodeSent(true);
       startCountdown();
       if (res.devCode) {
-        setDevCode(`开发模式验证码：${res.devCode}`);
+        setDevCode({ code: res.devCode, hint: res.devHint ?? '开发模式验证码' });
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '发送失败');
@@ -115,7 +115,7 @@ export function AuthPage() {
     setError('');
     setCode('');
     setCodeSent(false);
-    setDevCode('');
+    setDevCode(null);
     setCountdown(0);
     if (countdownRef.current) clearInterval(countdownRef.current);
   }
@@ -203,7 +203,12 @@ export function AuthPage() {
                   )}
                 </button>
               </div>
-              {devCode && <p className="dev-code-hint">{devCode}</p>}
+              {devCode && (
+                <p className="dev-code-hint">
+                  <span className="dev-code-label">{devCode.hint}：</span>
+                  <span className="dev-code-value">{devCode.code}</span>
+                </p>
+              )}
             </div>
           )}
 

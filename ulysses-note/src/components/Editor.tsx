@@ -40,6 +40,21 @@ export function Editor() {
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
+  // Block Cmd/Ctrl+S to prevent browser save dialog; trigger immediate save instead
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (selectedSheetId) {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          updateSheet(selectedSheetId, { title, content });
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedSheetId, title, content, updateSheet]);
+
   // Auto-save with debounce
   const save = useCallback(
     (newTitle: string, newContent: string) => {

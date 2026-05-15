@@ -1657,11 +1657,21 @@ a {
 
 .dev-code-hint {
   font-size: 11px;
-  color: var(--accent);
   background: var(--accent-light);
-  padding: 4px 10px;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.dev-code-label {
+  color: var(--text-secondary);
+}
+.dev-code-value {
+  color: var(--accent);
   font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 /* Password row */

@@ -91,9 +91,11 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
     } else {
       await sendSmsCode(target, code, purpose);
     }
-    // In dev (no SMTP/SMS configured), also return the code in the response for testing
-    const devMode = type === 'email' ? !process.env.SMTP_HOST : true;
-    res.json({ ok: true, ...(devMode ? { devCode: code } : {}) });
+    const emailDevMode = type === 'email' && !process.env.SMTP_HOST;
+    const smsDevMode = type === 'phone' && !process.env.SMS_ACCESS_KEY_ID;
+    const devMode = emailDevMode || smsDevMode;
+    const devHint = smsDevMode ? '短信服务未配置，当前验证码' : '邮件服务未配置，当前验证码';
+    res.json({ ok: true, ...(devMode ? { devCode: code, devHint } : {}) });
   } catch (err) {
     console.error('Send code error:', err);
     res.status(500).json({ error: '发送失败，请稍后重试' });

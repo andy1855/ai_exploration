@@ -20,7 +20,7 @@ export interface LoginLog {
 
 export const authApi = {
   sendCode: (target: string, purpose: 'register' | 'login') =>
-    api.post<{ ok: boolean; devCode?: string }>('/auth/send-code', { target, purpose }),
+    api.post<{ ok: boolean; devCode?: string; devHint?: string }>('/auth/send-code', { target, purpose }),
 
   register: (data: { target: string; code: string; password?: string; nickname?: string }) =>
     api.post<AuthUser>('/auth/register', data),
