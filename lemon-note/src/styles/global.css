@@ -2881,7 +2881,7 @@ a {
 
 /* ========== ConfirmDialog ========== */
 .confirm-overlay {
-  z-index: 500;
+  z-index: 1100;
 }
 .confirm-dialog {
   background: var(--bg-primary);

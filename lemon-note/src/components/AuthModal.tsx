@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { LemonLogo } from './LemonLogo';
 import { Mail, Lock, Hash, Eye, EyeOff, Send, LogIn, UserPlus, Clock, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -269,12 +269,12 @@ export function LoginLogsPanel({ onClose }: LogsPanelProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useState(() => {
+  useEffect(() => {
     authApi.getLogs(1)
       .then((r) => { setLogs(r.logs); setTotal(r.total); })
       .catch((e) => setError(e instanceof ApiError ? e.message : '加载失败'))
       .finally(() => setLoading(false));
-  });
+  }, []);
 
   async function loadPage(p: number) {
     setLoading(true);
