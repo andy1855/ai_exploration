@@ -1232,6 +1232,7 @@ a {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .global-search-header {
@@ -1300,14 +1301,50 @@ a {
 .global-search-body {
   display: grid;
   grid-template-columns: minmax(200px, 34%) 1fr;
-  min-height: 360px;
-  max-height: min(520px, 72vh);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
 }
 
 .global-search-list {
   border-right: 1px solid var(--border-light);
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-primary);
+  min-height: 0;
+}
+
+.global-search-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  position: relative;
+}
+
+.global-search-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-primary);
+  flex-shrink: 0;
+}
+
+.global-search-preview-content {
+  flex: 1 1 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .global-search-hint,
@@ -1376,28 +1413,10 @@ a {
   flex-shrink: 0;
 }
 
-.global-search-preview {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--bg-secondary);
-  overflow: hidden;
-  position: relative;
-}
-
 .global-search-preview-empty {
   padding: 24px;
   font-size: 13px;
   color: var(--text-tertiary);
-}
-
-.global-search-preview-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg-primary);
 }
 
 .global-search-preview-type-icon {
@@ -1414,16 +1433,6 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.global-search-preview-content {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 16px 18px;
-  font-size: 13px;
-  line-height: 1.65;
-  min-height: 0;
 }
 
 .global-search-plain {

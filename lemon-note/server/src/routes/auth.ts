@@ -5,6 +5,7 @@ import { dbGet, dbAll, dbRun } from '../database';
 import { sendEmailCode } from '../services/notify';
 import { authenticate } from '../middleware/authenticate';
 import { validateNickname } from '../utils/nickname';
+import { formatDbTimestamp, dbTimeToMs } from '../utils/timestamp';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret';
@@ -30,11 +31,11 @@ async function recordLog(params: {
   req: Request; success: boolean; failReason?: string; deviceInfo?: string;
 }) {
   await dbRun(
-    `INSERT INTO login_logs (user_id, target, method, ip, user_agent, device_info, success, fail_reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO login_logs (user_id, target, method, ip, user_agent, device_info, success, fail_reason, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [params.userId, params.target, params.method, getIp(params.req),
      params.req.headers['user-agent'] ?? '', params.deviceInfo ?? null,
-     params.success ? 1 : 0, params.failReason ?? null]
+     params.success ? 1 : 0, params.failReason ?? null, formatDbTimestamp()]
   );
 }
 
@@ -43,14 +44,18 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
   if (!target || !purpose) { res.status(400).json({ error: '参数缺失' }); return; }
   if (!isEmail(target)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
 
+  const since = formatDbTimestamp(new Date(Date.now() - 3600000));
   const recent = await dbGet<{ cnt: number }>(
-    'SELECT count(*) as cnt FROM verification_codes WHERE target = ? AND created_at > UNIX_TIMESTAMP() - 3600', [target]);
+    'SELECT count(*) as cnt FROM verification_codes WHERE target = ? AND created_at > ?', [target, since]);
   if (recent && recent.cnt >= 5) { res.status(429).json({ error: '发送过于频繁，请稍后再试' }); return; }
 
   const code = randomCode();
-  const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
-  await dbRun('INSERT INTO verification_codes (target, code, type, purpose, expires_at) VALUES (?, ?, ?, ?, ?)',
-    [target, code, 'email', purpose, expiresAt]);
+  const expiresAtStr = formatDbTimestamp(new Date(Date.now() + CODE_TTL * 1000));
+  const createdAtStr = formatDbTimestamp();
+  await dbRun(
+    'INSERT INTO verification_codes (target, code, type, purpose, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [target, code, 'email', purpose, expiresAtStr, createdAtStr]
+  );
 
   try {
     await sendEmailCode(target, code, purpose);
@@ -69,9 +74,10 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   if (!target || !code) { res.status(400).json({ error: '参数缺失' }); return; }
   if (!isEmail(target)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
 
+  const nowFmt = formatDbTimestamp();
   const record = await dbGet<{ id: number }>(
     `SELECT * FROM verification_codes WHERE target = ? AND code = ? AND purpose = 'register'
-     AND used = 0 AND expires_at > UNIX_TIMESTAMP() ORDER BY id DESC LIMIT 1`, [target, code]);
+     AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1`, [target, code, nowFmt]);
   if (!record) { res.status(400).json({ error: '验证码错误或已过期' }); return; }
 
   const existing = await dbGet('SELECT id FROM users WHERE email = ?', [target]);
@@ -85,8 +91,9 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   } else { finalNickname = generateNickname(); }
 
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
-  const result = await dbRun('INSERT INTO users (email, phone, password, nickname) VALUES (?, NULL, ?, ?)',
-    [target, passwordHash, finalNickname]);
+  const regAt = formatDbTimestamp();
+  const result = await dbRun('INSERT INTO users (email, phone, password, nickname, created_at) VALUES (?, NULL, ?, ?, ?)',
+    [target, passwordHash, finalNickname, regAt]);
   const userId = result.insertId!;
   await dbRun('UPDATE verification_codes SET used = 1 WHERE id = ?', [record.id]);
 
@@ -125,9 +132,10 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     }
   } else {
     if (!code) { res.status(400).json({ error: '请输入验证码' }); return; }
+    const nowFmt = formatDbTimestamp();
     const record = await dbGet<{ id: number }>(
       `SELECT * FROM verification_codes WHERE target = ? AND code = ? AND purpose = 'login'
-       AND used = 0 AND expires_at > UNIX_TIMESTAMP() ORDER BY id DESC LIMIT 1`, [target, code]);
+       AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1`, [target, code, nowFmt]);
     if (!record) {
       await recordLog({ userId: user.id, target, method, req, success: false, failReason: '验证码错误或过期' });
       res.status(401).json({ error: '验证码错误或已过期' }); return;
@@ -144,9 +152,12 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 router.get('/me', authenticate, async (req: Request, res: Response): Promise<void> => {
-  const user = await dbGet('SELECT id, email, phone, nickname, created_at FROM users WHERE id = ?', [req.user!.userId]);
-  if (!user) { res.status(404).json({ error: '用户不存在' }); return; }
-  res.json(user);
+  const me = await dbGet<Record<string, unknown>>('SELECT id, email, phone, nickname, created_at FROM users WHERE id = ?', [req.user!.userId]);
+  if (!me) { res.status(404).json({ error: '用户不存在' }); return; }
+  res.json({
+    ...me,
+    created_at: dbTimeToMs(me.created_at as string | number),
+  });
 });
 
 router.post('/change-password', authenticate, async (req: Request, res: Response): Promise<void> => {
@@ -175,9 +186,10 @@ router.post('/change-email', authenticate, async (req: Request, res: Response): 
   const { newEmail, code } = req.body as { newEmail: string; code: string };
   if (!newEmail || !code) { res.status(400).json({ error: '参数缺失' }); return; }
   if (!isEmail(newEmail)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
+  const nowFmt = formatDbTimestamp();
   const record = await dbGet<{ id: number }>(
     `SELECT * FROM verification_codes WHERE target = ? AND code = ? AND purpose = 'register'
-     AND used = 0 AND expires_at > UNIX_TIMESTAMP() ORDER BY id DESC LIMIT 1`, [newEmail, code]);
+     AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1`, [newEmail, code, nowFmt]);
   if (!record) { res.status(400).json({ error: '验证码错误或已过期' }); return; }
   const existing = await dbGet('SELECT id FROM users WHERE email = ?', [newEmail]);
   if (existing) { res.status(409).json({ error: '该邮箱已被使用' }); return; }

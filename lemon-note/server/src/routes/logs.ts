@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { dbGet, dbAll } from '../database';
 import { authenticate } from '../middleware/authenticate';
+import { dbTimeToMs } from '../utils/timestamp';
 
 const router = Router();
 
@@ -18,7 +19,15 @@ router.get('/', authenticate, async (req: Request, res: Response): Promise<void>
   const total = await dbGet<{ cnt: number }>(
     'SELECT count(*) as cnt FROM login_logs WHERE user_id = ?', [req.user!.userId]);
 
-  res.json({ logs, total: total?.cnt ?? 0, page, limit });
+  res.json({
+    logs: logs.map((row) => ({
+      ...row,
+      created_at: dbTimeToMs(row.created_at as string | number),
+    })),
+    total: total?.cnt ?? 0,
+    page,
+    limit,
+  });
 });
 
 export default router;

@@ -1,4 +1,5 @@
 import { type RowDataPacket, type ResultSetHeader, type Pool, createPool } from 'mysql2/promise';
+import { applyMigrations } from './migrations/apply';
 
 const MYSQL_CONFIG = {
   host: process.env.MYSQL_HOST ?? '127.0.0.1',
@@ -18,6 +19,7 @@ export async function initDb(): Promise<void> {
   const conn = await pool.getConnection();
   conn.release();
   console.log(`[db] MySQL connected to ${MYSQL_CONFIG.database}@${MYSQL_CONFIG.host}`);
+  await applyMigrations(pool);
 }
 
 export function getPool(): Pool {
@@ -48,7 +50,7 @@ export type User = {
   phone: string | null;
   password: string | null;
   nickname: string | null;
-  created_at: number;
+  created_at: string | number;
 };
 
 export type LoginLog = {
@@ -60,5 +62,5 @@ export type LoginLog = {
   user_agent: string | null;
   success: number;
   fail_reason: string | null;
-  created_at: number;
+  created_at: string | number;
 };

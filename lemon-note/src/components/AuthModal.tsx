@@ -316,7 +316,7 @@ export function LoginLogsPanel({ onClose }: LogsPanelProps) {
               </div>
               <div className="log-meta">
                 <span>{log.ip ?? '—'}</span>
-                <span>{new Date(log.created_at * 1000).toLocaleString('zh-CN')}</span>
+                <span>{new Date(log.created_at).toLocaleString('zh-CN')}</span>
               </div>
               {log.device_info && (() => {
                 try {

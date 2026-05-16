@@ -1,0 +1,22 @@
+-- Lemon Note：把时间列从「毫秒 BIGINT」迁到「yyyy-MM-dd HH:mm:ss.SSS」VARCHAR(26)
+-- 按库内实际类型调整；建议在维护窗口执行并做好备份。
+--
+-- 示例（sheets 的 created_at / updated_at 为 BIGINT 毫秒时）：
+--
+-- UPDATE sheets SET
+--   created_at = CONCAT(
+--     DATE_FORMAT(FROM_UNIXTIME(FLOOR(created_at / 1000)), '%Y-%m-%d %H:%i:%s'),
+--     '.',
+--     LPAD(created_at % 1000, 3, '0')
+--   );
+-- UPDATE sheets SET
+--   updated_at = CONCAT(
+--     DATE_FORMAT(FROM_UNIXTIME(FLOOR(updated_at / 1000)), '%Y-%m-%d %H:%i:%s'),
+--     '.',
+--     LPAD(updated_at % 1000, 3, '0')
+--   );
+--
+-- ALTER TABLE sheets MODIFY COLUMN created_at VARCHAR(26) NOT NULL;
+-- ALTER TABLE sheets MODIFY COLUMN updated_at VARCHAR(26) NOT NULL;
+--
+-- 对其余表（sheet_versions、users、login_logs、verification_codes）类推迁移后 MODIFY。
