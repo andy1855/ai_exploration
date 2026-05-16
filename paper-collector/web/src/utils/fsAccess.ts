@@ -7,6 +7,15 @@ export type ImageEntry = {
   file: FileSystemFileHandle
 }
 
+/** 通过 <input type="file"> 上传的图片条目。 */
+export type UploadedEntry = {
+  relativePath: string
+  file: File
+  dataUrl: string
+}
+
+export { IMAGE_EXT }
+
 function isSkippedByCleanedRelative(relativePath: string): boolean {
   const norm = relativePath.replace(/\\/g, '/')
   return norm === 'cleaned' || norm.startsWith('cleaned/')

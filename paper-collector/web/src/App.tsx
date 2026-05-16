@@ -5,14 +5,15 @@ import {
   Loader2,
   RefreshCw,
   Save,
+  Upload,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import type { InkRemoveOptions } from './utils/inkRemove.ts'
 import { inkRemoveDefaults, removeInkMarks } from './utils/inkRemove.ts'
 import { buildDocxBlob, buildPdfBlob } from './utils/exportDoc.ts'
-import type { ImageEntry } from './utils/fsAccess.ts'
-import { collectImagesRecursive, ensureCleanedWritable } from './utils/fsAccess.ts'
+import type { ImageEntry, UploadedEntry } from './utils/fsAccess.ts'
+import { IMAGE_EXT, collectImagesRecursive, ensureCleanedWritable } from './utils/fsAccess.ts'
 
 function supportsFsAccess(): boolean {
   return typeof window !== 'undefined' && 'showDirectoryPicker' in window
@@ -70,11 +71,13 @@ export function App() {
   const [folderName, setFolderName] = useState<string | null>(null)
   const [dir, setDir] = useState<FileSystemDirectoryHandle | null>(null)
   const [entries, setEntries] = useState<ImageEntry[]>([])
+  const [uploadedEntries, setUploadedEntries] = useState<UploadedEntry[]>([])
   const [cleanSet, setCleanSet] = useState(() => new Set<string>())
   const [asmOrder, setAsmOrder] = useState<string[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [statusText, setStatusText] = useState('')
   const [errorText, setErrorText] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [chromaStrength, setChromaStrength] = useState(Math.round(inkRemoveDefaults.chromaStrength * 100))
   const [printCap, setPrintCap] = useState(inkRemoveDefaults.printBlackBrightnessCap)
@@ -125,6 +128,40 @@ export function App() {
     }
   }, [])
 
+  const handleFileUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorText('')
+    const files = ev.target.files
+    if (!files || files.length === 0) return
+
+    const imageFiles: File[] = []
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!
+      if (IMAGE_EXT.test(f.name)) imageFiles.push(f)
+    }
+    if (imageFiles.length === 0) {
+      setErrorText('未找到图片文件（支持的格式：jpg/png/webp/gif）。')
+      return
+    }
+
+    // Clear FS access mode if active
+    setDir(null)
+    setEntries([])
+    setFolderName(null)
+
+    // Build uploaded entries with data URLs for rendering
+    const entries: UploadedEntry[] = imageFiles.map((f) => ({
+      relativePath: f.name,
+      file: f,
+      dataUrl: URL.createObjectURL(f),
+    }))
+    setUploadedEntries(entries)
+    setCleanSet(new Set())
+    setAsmOrder([])
+    setStatusText(`已上传 ${entries.length} 张图片。`)
+    // Reset input so re-selecting same files triggers change
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
+
   const refreshList = useCallback(async () => {
     if (!dir) return
     setErrorText('')
@@ -168,56 +205,88 @@ export function App() {
   }
 
   const runCleaning = async () => {
-    if (!dir || cleanSet.size === 0) {
+    if ((!dir && uploadedEntries.length === 0) || cleanSet.size === 0) {
       setErrorText('请先在表格中勾选要「笔迹擦除」的图片。')
       return
     }
     setBusy('clean')
     setErrorText('')
     setStatusText('')
+
+    const isUploadMode = uploadedEntries.length > 0
+    const targets = isUploadMode
+      ? uploadedEntries.filter((e) => cleanSet.has(e.relativePath))
+      : entries.filter((e) => cleanSet.has(e.relativePath))
+
     try {
-      const targets = entries.filter((e) => cleanSet.has(e.relativePath))
       let done = 0
       let failed = 0
+      const cleanedBlobs: { blob: Blob; path: string }[] = []
+
       for (const row of targets) {
         try {
-          const fh = row.file
-          const fileObj = await fh.getFile()
+          const fileObj = isUploadMode
+            ? (row as UploadedEntry).file
+            : await (row as ImageEntry).file.getFile()
           const output = await removeInkMarks(fileObj, inkOpts)
 
-          const { writable } = await ensureCleanedWritable(dir, row.relativePath)
-          await writable.write(output)
-          await writable.close()
+          if (isUploadMode) {
+            cleanedBlobs.push({ blob: output, path: (row as UploadedEntry).relativePath })
+          } else {
+            const { writable } = await ensureCleanedWritable(dir!, (row as ImageEntry).relativePath)
+            await writable.write(output)
+            await writable.close()
+          }
 
           done += 1
-          setStatusText(`已写入 cleaned/ … ${done}/${targets.length}`)
+          setStatusText(isUploadMode ? `处理中 … ${done}/${targets.length}` : `已写入 cleaned/ … ${done}/${targets.length}`)
         } catch {
           failed += 1
         }
       }
-      const tail = failed > 0 ? `，${failed} 张写入失败（可能不是有效图片或被占用）。` : ''
-      setStatusText(`已完成：${done}/${targets.length} 张写入到「cleaned」子目录${tail}`)
+
+      if (isUploadMode && cleanedBlobs.length > 0) {
+        // Download cleaned images as individual files
+        for (const { blob, path } of cleanedBlobs) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          const name = path.replace(IMAGE_EXT, (m) => `_cleaned${m}`)
+          a.download = name
+          a.click()
+          URL.revokeObjectURL(url)
+        }
+        const tail = failed > 0 ? `，${failed} 张处理失败。` : ''
+        setStatusText(`已处理 ${done}/${targets.length} 张，已下载到本地（文件名为原图添加 _cleaned 后缀）${tail}`)
+      } else {
+        const tail = failed > 0 ? `，${failed} 张写入失败（可能不是有效图片或被占用）。` : ''
+        setStatusText(`已完成：${done}/${targets.length} 张写入到「cleaned」子目录${tail}`)
+      }
     } catch (e) {
-      setErrorText((e as Error)?.message ?? '写入 cleaned 时出现错误（请保留目录授权）。')
+      setErrorText((e as Error)?.message ?? '处理图片时出现错误。')
     } finally {
       setBusy(null)
     }
   }
 
   const blobsForAsm = useCallback(async (): Promise<{ blob: Blob; path: string }[]> => {
-    const rels = asmOrder.filter((rel) => entries.some((r) => r.relativePath === rel))
+    const isUploadMode = uploadedEntries.length > 0
+    const allEntries = isUploadMode ? uploadedEntries : entries
+    const rels = asmOrder.filter((rel) => allEntries.some((r) => r.relativePath === rel))
     if (rels.length === 0)
       throw new Error('请先勾选「编入错题」，或调整汇编顺序中包含至少一页图片。')
 
     const out: { blob: Blob; path: string }[] = []
     for (const rel of rels) {
-      const entry = entries.find((e) => e.relativePath === rel)
+      const entry = allEntries.find((e) => e.relativePath === rel) as ImageEntry | UploadedEntry | undefined
       if (!entry) continue
-      const f = await entry.file.getFile()
+      const f = isUploadMode
+        ? (entry as UploadedEntry).file
+        : await (entry as ImageEntry).file.getFile()
       out.push({ blob: f, path: rel })
     }
     return out
-  }, [asmOrder, entries])
+  }, [asmOrder, entries, uploadedEntries])
 
   const exportPdf = async () => {
     setBusy('pdf')
@@ -287,21 +356,39 @@ export function App() {
       </div>
 
       <div className="btn-row">
-        <button type="button" className="btn-primary" onClick={pickFolder}>
+        <button type="button" className="btn-primary" onClick={pickFolder} disabled={!!busy}>
           <FolderOpen size={16} />
           {folderName ? '重新选择文件夹' : '选择本地目录'}
         </button>
-        <button type="button" className="btn-soft" disabled={!dir || !!busy} onClick={refreshList}>
+        <button type="button" className="btn-soft" onClick={() => fileInputRef.current?.click()} disabled={!!busy}>
+          <Upload size={16} />
+          上传图片
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          style={{ display: 'none' }}
+          onChange={handleFileUpload}
+        />
+        <button type="button" className="btn-soft" disabled={(!dir && uploadedEntries.length === 0) || !!busy} onClick={refreshList}>
           <RefreshCw size={16} />
           刷新列表
         </button>
-        <span className="slug">{folderName ? `当前文件夹：${folderName}` : '尚未选择文件夹'}</span>
+        <span className="slug">
+          {folderName
+            ? `当前文件夹：${folderName}`
+            : uploadedEntries.length > 0
+              ? `已上传 ${uploadedEntries.length} 张图片`
+              : '尚未选择文件夹或上传图片'}
+        </span>
       </div>
 
       {!supportsFsAccess() ? (
         <div className="banner">
-          Safari/Firefox 等浏览器无法在网页里获得稳定的「读整个目录」与「在用户目录里创建子文件夹」权限，请使用 Chromium
-          系浏览器以获得完整体验。
+          当前环境不支持 File System Access API，但您可以使用「上传图片」按钮手动选择图片文件（单次可选多张）。
+          上传模式下，「笔迹擦除」的结果将通过浏览器下载到本地。
         </div>
       ) : null}
 
@@ -315,37 +402,38 @@ export function App() {
             </tr>
           </thead>
           <tbody>
-            {entries.map((row) => {
-              const ck = cleanSet.has(row.relativePath)
-              const ak = asmOrder.includes(row.relativePath)
+            {(uploadedEntries.length > 0 ? uploadedEntries : entries).map((row) => {
+              const rel = row.relativePath
+              const ck = cleanSet.has(rel)
+              const ak = asmOrder.includes(rel)
               return (
-                <tr key={row.relativePath}>
-                  <td className="path-cell">{row.relativePath}</td>
+                <tr key={rel}>
+                  <td className="path-cell">{rel}</td>
                   <td style={{ textAlign: 'center' }}>
                     <input
                       type="checkbox"
-                      aria-label={`笔迹擦除：${row.relativePath}`}
+                      aria-label={`笔迹擦除：${rel}`}
                       checked={ck}
-                      onChange={() => toggleClean(row.relativePath)}
-                      disabled={!dir || !!busy}
+                      onChange={() => toggleClean(rel)}
+                      disabled={(!dir && uploadedEntries.length === 0) || !!busy}
                     />
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     <input
                       type="checkbox"
-                      aria-label={`编入错题：${row.relativePath}`}
+                      aria-label={`编入错题：${rel}`}
                       checked={ak}
-                      onChange={() => toggleAsm(row.relativePath)}
-                      disabled={!dir || !!busy}
+                      onChange={() => toggleAsm(rel)}
+                      disabled={(!dir && uploadedEntries.length === 0) || !!busy}
                     />
                   </td>
                 </tr>
               )
             })}
-            {entries.length === 0 ? (
+            {entries.length === 0 && uploadedEntries.length === 0 ? (
               <tr>
                 <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                  {folderName ? '未发现图片或无读取权限；也确认未把图片放在顶层 cleaned 子目录（该目录不会在列表中枚举）。' : '请先选择本地目录'}
+                  {folderName ? '未发现图片或无读取权限；也确认未把图片放在顶层 cleaned 子目录（该目录不会在列表中枚举）。' : '请选择本地目录或上传图片'}
                 </td>
               </tr>
             ) : null}
@@ -429,9 +517,9 @@ export function App() {
           </div>
 
           <div className="btn-row">
-            <button type="button" className="btn-primary" disabled={!dir || cleanSet.size === 0 || !!busy} onClick={runCleaning}>
+            <button type="button" className="btn-primary" disabled={(entries.length === 0 && uploadedEntries.length === 0) || cleanSet.size === 0 || !!busy} onClick={runCleaning}>
               {busy === 'clean' ? <Loader2 className="spinner" size={16} /> : <Eraser size={16} />}
-              {busy === 'clean' ? `处理 ${cleanSet.size} 张 …` : '写入所选到 cleaned/' }
+              {busy === 'clean' ? `处理 ${cleanSet.size} 张 …` : uploadedEntries.length > 0 ? '擦除并下载' : '写入所选到 cleaned/' }
             </button>
           </div>
         </section>
