@@ -1,6 +1,7 @@
 import type { Sheet, Group } from '../types';
 import { notesApi } from '../api/notes';
 import { tryAutoBackup } from './noteBackup';
+import { checkpointSheetsBeforePush } from '../version/versionCheckpoint';
 
 export const NOTES_STORAGE_KEY = 'lemon-note-data';
 const ULYSSES_STORAGE_KEY = 'ulysses-note-data';
@@ -216,6 +217,11 @@ async function fetchFromServer(): Promise<{ sheets: Sheet[]; groups: Group[] } |
  * 将本地数据推送到服务器（全量覆盖）。
  */
 async function pushToServer(sheets: Sheet[], groups: Group[]) {
+  try {
+    await checkpointSheetsBeforePush(sheets);
+  } catch (e) {
+    console.warn('[sync] 同步前版本检查点失败', e);
+  }
   try {
     await notesApi.syncAll({ sheets, groups });
   } catch (e) {

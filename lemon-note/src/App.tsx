@@ -8,6 +8,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { useNoteStore } from './store/useNoteStore';
 import { useAuthStore } from './store/useAuthStore';
+import { checkpointOnUnload } from './version/versionCheckpoint';
+import type { EditorViewMode } from './types';
 import {
   Sun, Moon, Settings, User, Shield, PanelLeftOpen, PanelLeftClose,
 } from 'lucide-react';
@@ -84,6 +86,35 @@ function App() {
         e.preventDefault();
         setShowGlobalSearch(true);
       }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
+
+  // 关闭或隐藏页面前，对当前文稿尝试版本检查点
+  useEffect(() => {
+    const onLeave = () => {
+      const { selectedSheetId, sheets } = useNoteStore.getState();
+      const sheet = sheets.find((s) => s.id === selectedSheetId);
+      checkpointOnUnload(sheet);
+    };
+    window.addEventListener('beforeunload', onLeave);
+    window.addEventListener('pagehide', onLeave);
+    return () => {
+      window.removeEventListener('beforeunload', onLeave);
+      window.removeEventListener('pagehide', onLeave);
+    };
+  }, []);
+
+  // 编辑视图：⌥⌘1/2/3 · Ctrl+Alt+1/2/3（默认 / 专注 / 打字机）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.altKey) return;
+      const k = e.key;
+      if (k !== '1' && k !== '2' && k !== '3') return;
+      e.preventDefault();
+      const mode: EditorViewMode = k === '1' ? 'default' : k === '2' ? 'focus' : 'typewriter';
+      useNoteStore.getState().updatePreferences({ editorViewMode: mode });
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);

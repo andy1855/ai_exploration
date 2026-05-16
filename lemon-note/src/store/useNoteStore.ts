@@ -4,7 +4,7 @@ import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode, MarkdownP
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
-import { notesApi } from '../api/notes';
+import { requestCheckpoint } from '../version/versionCheckpoint';
 
 const PREFS_KEY = 'lemon-note-preferences';
 
@@ -135,6 +135,11 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     createSheet: (groupId?: string, type: SheetType = 'plain', language?: string | null) => {
+      const before = get();
+      if (before.selectedSheetId) {
+        const prevSheet = before.sheets.find((s) => s.id === before.selectedSheetId);
+        if (prevSheet) void requestCheckpoint(prevSheet, 'sheet_switch');
+      }
       const now = Date.now();
       const ext = type === 'code' ? getLanguageExtName(language) : type === 'markdown' ? '.md' : '';
       const baseName = type === 'markdown' ? '未命名文稿' : type === 'code' ? '未命名代码' : '未命名文稿';
@@ -161,14 +166,6 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     updateSheet: (id, updates) => {
-      // 内容变更时，先保存旧版本到服务器
-      if (updates.content !== undefined) {
-        const old = get().sheets.find((s) => s.id === id);
-        if (old && old.content !== updates.content) {
-          notesApi.saveVersion(old).catch(() => {});
-        }
-      }
-
       set((state) => {
         const sheets = state.sheets.map((s) => {
           if (s.id !== id) return s;
@@ -242,6 +239,11 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     copySheet: (id, groupId) => {
+      const before = get();
+      if (before.selectedSheetId && before.selectedSheetId !== id) {
+        const prevSheet = before.sheets.find((s) => s.id === before.selectedSheetId);
+        if (prevSheet) void requestCheckpoint(prevSheet, 'sheet_switch');
+      }
       const now = Date.now();
       const src = useNoteStore.getState().sheets.find((s) => s.id === id);
       if (!src) return '';
@@ -261,7 +263,15 @@ export const useNoteStore = create<NoteState>((set, get) => {
       return copy.id;
     },
 
-    selectSheet: (id) => set({ selectedSheetId: id }),
+    selectSheet: (id) => {
+      const state = get();
+      const prevId = state.selectedSheetId;
+      if (prevId && prevId !== id) {
+        const prevSheet = state.sheets.find((s) => s.id === prevId);
+        if (prevSheet) void requestCheckpoint(prevSheet, 'sheet_switch');
+      }
+      set({ selectedSheetId: id });
+    },
 
     createGroup: (name = '新建分组', parentId = null) => {
       const now = Date.now();

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space, Download, Upload, RotateCcw, Clock } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Type, Hash, Sliders, Keyboard, Database, AlignJustify, Space, Download, Upload, RotateCcw, Clock, LayoutTemplate, Focus } from 'lucide-react';
 import { useNoteStore } from '../store/useNoteStore';
 import type { ThemeMode } from '../types';
 import {
@@ -41,6 +41,9 @@ const LETTER_SPACINGS = [0, 0.5, 1, 1.5, 2];
 const SHORTCUTS = [
   { keys: '⌘ S / Ctrl S', desc: '保存文档' },
   { keys: '⌘ F / Ctrl F', desc: '全局搜索（回车执行搜索）' },
+  { keys: '⌥ ⌘ 1 / Ctrl+Alt+1', desc: '编辑视图：默认' },
+  { keys: '⌥ ⌘ 2 / Ctrl+Alt+2', desc: '编辑视图：专注' },
+  { keys: '⌥ ⌘ 3 / Ctrl+Alt+3', desc: '编辑视图：打字机' },
   { keys: '⌘ B / Ctrl B', desc: '加粗（Markdown）' },
   { keys: '⌘ I / Ctrl I', desc: '斜体（Markdown）' },
   { keys: '⌘ K / Ctrl K', desc: '插入链接（Markdown）' },
@@ -165,8 +168,36 @@ export function SettingsModal({ onClose }: Props) {
                 <h4 className="settings-section-title">编辑视图</h4>
                 <p className="settings-prose">
                   <strong>默认</strong>显示完整工具栏与标题；<strong>专注</strong>弱化边距与工具栏，突出正文；
-                  <strong>打字机</strong>让当前行大致保持在编辑区垂直中央，适合长文连续输入。三种模式可在编辑器右上角快速切换。
+                  <strong>打字机</strong>让当前行大致保持在编辑区垂直中央，适合长文连续输入。也可使用快捷键（「快捷键」标签）切换。
                 </p>
+                <div className="settings-item">
+                  <div className="editor-mode-switch" title="编辑区显示样式">
+                    <button
+                      type="button"
+                      className={`mode-chip${preferences.editorViewMode === 'default' ? ' active' : ''}`}
+                      onClick={() => updatePreferences({ editorViewMode: 'default' })}
+                    >
+                      <LayoutTemplate size={14} />
+                      <span>默认</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`mode-chip${preferences.editorViewMode === 'focus' ? ' active' : ''}`}
+                      onClick={() => updatePreferences({ editorViewMode: 'focus' })}
+                    >
+                      <Focus size={14} />
+                      <span>专注</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`mode-chip${preferences.editorViewMode === 'typewriter' ? ' active' : ''}`}
+                      onClick={() => updatePreferences({ editorViewMode: 'typewriter' })}
+                    >
+                      <Type size={14} />
+                      <span>打字机</span>
+                    </button>
+                  </div>
+                </div>
               </section>
 
               <section className="settings-section">
@@ -343,7 +374,7 @@ export function SettingsModal({ onClose }: Props) {
 
               <h4 className="settings-section-title settings-section-title--spaced">备份与恢复</h4>
               <p className="settings-prose">
-                编辑文稿时自动在服务端保存版本历史（每个文稿最近 10 个版本），同时本地也保留 5 份快照。
+                服务端在切换文稿、同步到云端前、关闭页面等时机，按时间与变更量等条件写入版本历史，并定期删除约 2 个月前的旧版本（每篇文稿仍设有条数上限）。本地另保留 5 份快照备份。
               </p>
 
               <div className="settings-backup-list">

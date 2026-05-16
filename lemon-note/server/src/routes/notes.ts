@@ -3,6 +3,12 @@ import { dbGet, dbAll, dbRun } from '../database';
 import { authenticate } from '../middleware/authenticate';
 import { formatDbTimestamp, msToDbTimestamp, dbTimeToMs } from '../utils/timestamp';
 
+function twoMonthsAgoDbTimestamp(): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 2);
+  return formatDbTimestamp(d);
+}
+
 const router = Router();
 router.use(authenticate);
 
@@ -203,12 +209,16 @@ router.post('/versions', async (req: Request, res: Response): Promise<void> => {
     ]
   );
 
+  const cutoff = twoMonthsAgoDbTimestamp();
+  await dbRun(`DELETE FROM sheet_versions WHERE user_id = ? AND created_at < ?`, [userId, cutoff]);
+
   const versions = await dbAll<{ id: number; created_at: string | number }>(
     'SELECT id, created_at FROM sheet_versions WHERE sheet_id = ? ORDER BY created_at DESC',
     [sheetId]
   );
-  if (versions.length > 10) {
-    const idsToDelete = versions.slice(10).map((v) => v.id);
+  const maxPerSheet = 50;
+  if (versions.length > maxPerSheet) {
+    const idsToDelete = versions.slice(maxPerSheet).map((v) => v.id);
     await dbRun(`DELETE FROM sheet_versions WHERE id IN (${idsToDelete.map(() => '?').join(',')})`, idsToDelete);
   }
 
@@ -219,7 +229,7 @@ router.get('/versions/:sheetId', async (req: Request, res: Response): Promise<vo
   const userId = req.user!.userId;
   const versions = await dbAll(
     `SELECT id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at
-     FROM sheet_versions WHERE sheet_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 10`,
+     FROM sheet_versions WHERE sheet_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50`,
     [req.params.sheetId, userId]
   );
   res.json({

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } fr
 import MDEditor from '@uiw/react-md-editor';
 import { LemonLogo } from './LemonLogo';
 import { useNoteStore } from '../store/useNoteStore';
-import type { EditorViewMode, MarkdownPreviewMode } from '../types';
+import type { MarkdownPreviewMode } from '../types';
 import {
   Trash2,
   FileText,
@@ -24,7 +24,6 @@ import {
   Heading3,
   Strikethrough,
   Type,
-  LayoutTemplate,
   Focus,
   Clock,
   PenLine,
@@ -397,7 +396,6 @@ export function Editor() {
 
   const setMarkdownPreviewMode = (markdownPreviewMode: MarkdownPreviewMode) =>
     updatePreferences({ markdownPreviewMode });
-  const setEditorViewMode = (editorViewMode: EditorViewMode) => updatePreferences({ editorViewMode });
   const toggleFullscreen = () => updatePreferences({ fullscreen: !preferences.fullscreen });
   const toggleFormattingBar = () => updatePreferences({ formattingBarCollapsed: !preferences.formattingBarCollapsed });
 
@@ -548,32 +546,6 @@ export function Editor() {
               </button>
             </div>
           )}
-          <div className="editor-mode-switch" title="专注：界面极简；打字机：光标行居中">
-            <button
-              type="button"
-              className={`mode-chip${viewMode === 'default' ? ' active' : ''}`}
-              onClick={() => setEditorViewMode('default')}
-            >
-              <LayoutTemplate size={14} />
-              <span>默认</span>
-            </button>
-            <button
-              type="button"
-              className={`mode-chip${viewMode === 'focus' ? ' active' : ''}`}
-              onClick={() => setEditorViewMode('focus')}
-            >
-              <Focus size={14} />
-              <span>专注</span>
-            </button>
-            <button
-              type="button"
-              className={`mode-chip${viewMode === 'typewriter' ? ' active' : ''}`}
-              onClick={() => setEditorViewMode('typewriter')}
-            >
-              <Type size={14} />
-              <span>打字机</span>
-            </button>
-          </div>
           <button
             className={`toolbar-btn ${preferences.fullscreen ? 'active' : ''}`}
             onClick={toggleFullscreen}
