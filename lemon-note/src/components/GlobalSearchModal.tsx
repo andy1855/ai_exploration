@@ -14,8 +14,8 @@ function matchSheets(sheets: Sheet[], q: string): Sheet[] {
   const t = q.trim();
   if (!t) return [];
   return sheets.filter(
-    (s) => textIncludesQuery(s.title, t) || textIncludesQuery(s.content, t)
-  ).sort((a, b) => b.updatedAt - a.updatedAt);
+    (s) => textIncludesQuery(s.title ?? '', t) || textIncludesQuery(s.content ?? '', t)
+  ).sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
 }
 
 function HighlightInline({ text, query }: { text: string; query: string }) {
@@ -87,7 +87,8 @@ export function GlobalSearchModal({ onClose }: Props) {
   }, [onClose]);
 
   const runSearch = () => {
-    setAppliedQuery(draft.trim());
+    const q = draft.trim();
+    setAppliedQuery(q);
   };
 
   const openInEditor = (id: string) => {
@@ -100,30 +101,38 @@ export function GlobalSearchModal({ onClose }: Props) {
   const snippet = active ? previewSnippet(active.content, appliedQuery) : '';
 
   return (
-    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+    <div className="modal-overlay modal-overlay--glass global-search-overlay" onClick={onClose}>
       <div className="modal-content modal-panel global-search-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header global-search-header">
-          <div className="global-search-input-wrap">
-            <Search size={16} className="global-search-icon" />
-            <input
-              ref={inputRef}
-              className="global-search-input"
-              placeholder="输入关键词，按回车搜索…"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  runSearch();
-                }
-              }}
-            />
-            {draft && (
-              <button type="button" className="global-search-clear" onClick={() => setDraft('')} aria-label="清空">
-                <X size={14} />
-              </button>
-            )}
-          </div>
+          <form
+            className="global-search-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSearch();
+            }}
+          >
+            <div className="global-search-input-wrap">
+              <Search size={18} className="global-search-icon" aria-hidden />
+              <input
+                ref={inputRef}
+                className="global-search-input"
+                placeholder="输入关键词，按回车搜索…"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                autoComplete="off"
+                enterKeyHint="search"
+                name="q"
+              />
+              {draft ? (
+                <button type="button" className="global-search-clear" onClick={() => setDraft('')} aria-label="清空">
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+            <button type="submit" className="global-search-submit-btn">
+              搜索
+            </button>
+          </form>
           <button type="button" className="icon-btn modal-close-btn" onClick={onClose} aria-label="关闭">
             <X size={18} />
           </button>
@@ -135,7 +144,7 @@ export function GlobalSearchModal({ onClose }: Props) {
               <div className="global-search-empty">没有匹配的文稿</div>
             )}
             {!appliedQuery.trim() && (
-              <div className="global-search-hint">输入关键词后按 <kbd className="global-search-kbd">Enter</kbd> 搜索，浏览匹配文稿与预览</div>
+              <div className="global-search-hint">输入关键词后按 <kbd className="global-search-kbd">Enter</kbd> 或点击「搜索」浏览匹配文稿与预览</div>
             )}
             {matched.map((s) => (
               <button
