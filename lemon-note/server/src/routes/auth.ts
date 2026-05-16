@@ -6,6 +6,11 @@ import { sendEmailCode } from '../services/notify';
 import { authenticate } from '../middleware/authenticate';
 import { validateNickname } from '../utils/nickname';
 import { formatDbTimestamp, dbTimeToMs } from '../utils/timestamp';
+import {
+  markUserDeleted,
+  markAllSheetsDeletedForUser,
+  markAllGroupsDeletedForUser,
+} from '../utils/softDelete';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret';
@@ -195,6 +200,36 @@ router.post('/change-email', authenticate, async (req: Request, res: Response): 
   if (existing) { res.status(409).json({ error: '该邮箱已被使用' }); return; }
   await dbRun('UPDATE users SET email = ? WHERE id = ?', [newEmail, req.user!.userId]);
   await dbRun('UPDATE verification_codes SET used = 1 WHERE id = ?', [record.id]);
+  res.json({ ok: true });
+});
+
+/** 注销账户：软删除用户行 + 名下全部 sheets / note_groups */
+router.post('/close-account', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const { password } = req.body as { password?: string };
+  const userId = req.user!.userId;
+  const user = await dbGet<{ password: string | null }>(
+    'SELECT password FROM users WHERE id = ? AND (deleted IS NULL OR deleted = 0)',
+    [userId]
+  );
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' });
+    return;
+  }
+  if (user.password) {
+    if (!password) {
+      res.status(400).json({ error: '请输入当前密码以注销账户' });
+      return;
+    }
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) {
+      res.status(401).json({ error: '密码错误' });
+      return;
+    }
+  }
+  const nowStr = formatDbTimestamp();
+  await markAllSheetsDeletedForUser(userId, nowStr);
+  await markAllGroupsDeletedForUser(userId, nowStr);
+  await markUserDeleted(userId, nowStr);
   res.json({ ok: true });
 });
 

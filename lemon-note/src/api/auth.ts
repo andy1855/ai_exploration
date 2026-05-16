@@ -43,4 +43,8 @@ export const authApi = {
 
   changePassword: (oldPassword: string | undefined, newPassword: string) =>
     api.post<{ ok: boolean }>('/auth/change-password', { oldPassword, newPassword }),
+
+  /** 注销账户：软删除用户及名下全部笔记、分组 */
+  closeAccount: (password?: string) =>
+    api.post<{ ok: boolean }>('/auth/close-account', password != null ? { password } : {}),
 };

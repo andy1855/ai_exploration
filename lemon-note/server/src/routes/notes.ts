@@ -2,6 +2,13 @@ import { Router, type Request, type Response } from 'express';
 import { dbGet, dbAll, dbRun } from '../database';
 import { authenticate } from '../middleware/authenticate';
 import { formatDbTimestamp, msToDbTimestamp, dbTimeToMs } from '../utils/timestamp';
+import {
+  fetchNotesSnapshotForUser,
+  listAliveSheetIds,
+  listAliveGroupIds,
+  markSheetDeleted,
+  markGroupDeleted,
+} from '../utils/softDelete';
 
 function twoMonthsAgoDbTimestamp(): string {
   const d = new Date();
@@ -15,23 +22,7 @@ router.use(authenticate);
 // GET /api/notes
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.userId;
-
-  const sheets = await dbAll<Record<string, unknown>>(
-    `SELECT id, title, content, type, language, group_id, pinned,
-            word_count, chinese_count, english_count, created_at, updated_at
-     FROM sheets
-     WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)
-     ORDER BY updated_at DESC`,
-    [userId]
-  );
-
-  const groups = await dbAll<Record<string, unknown>>(
-    `SELECT id, name, icon, color, parent_id, \`order\`, collapsed
-     FROM note_groups
-     WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)
-     ORDER BY \`order\` ASC`,
-    [userId]
-  );
+  const { sheets, groups } = await fetchNotesSnapshotForUser(userId);
 
   res.json({
     sheets: sheets.map((s) => ({
@@ -58,6 +49,30 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       collapsed: g.collapsed === 1,
     })),
   });
+});
+
+/** 显式软删文稿（不依赖全量同步延时） */
+router.delete('/sheets/:sheetId', async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.userId;
+  const sheetId = req.params.sheetId;
+  const n = await markSheetDeleted(userId, sheetId);
+  if (n === 0) {
+    res.status(404).json({ error: '未找到文稿或已删除' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+/** 显式软删分组 */
+router.delete('/groups/:groupId', async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.userId;
+  const groupId = req.params.groupId;
+  const n = await markGroupDeleted(userId, groupId);
+  if (n === 0) {
+    res.status(404).json({ error: '未找到分组或已删除' });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 // PUT /api/notes — 全量同步（客户端未包含的 id 做软删）
@@ -92,18 +107,12 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
   const nowStr = formatDbTimestamp();
 
   if (Array.isArray(sheets)) {
-    const aliveRows = await dbAll<{ id: string }>(
-      `SELECT id FROM sheets WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)`,
-      [userId]
-    );
+    const aliveRows = await listAliveSheetIds(userId);
     const clientIds = new Set(sheets.map((s) => s.id));
     for (const row of aliveRows) {
       if (!clientIds.has(row.id)) {
-        const r = await dbRun(
-          `UPDATE sheets SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0)`,
-          [nowStr, row.id, userId]
-        );
-        if (r.affectedRows === 0) {
+        const n = await markSheetDeleted(userId, row.id, nowStr);
+        if (n === 0) {
           console.warn('[notes/sync] soft-delete sheet skipped (0 rows)', row.id, userId);
         }
       }
@@ -143,18 +152,12 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
   }
 
   if (Array.isArray(groups)) {
-    const aliveGroups = await dbAll<{ id: string }>(
-      `SELECT id FROM note_groups WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)`,
-      [userId]
-    );
+    const aliveGroups = await listAliveGroupIds(userId);
     const clientGids = new Set(groups.map((g) => g.id));
     for (const row of aliveGroups) {
       if (!clientGids.has(row.id)) {
-        const r = await dbRun(
-          `UPDATE note_groups SET deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0)`,
-          [nowStr, nowStr, row.id, userId]
-        );
-        if (r.affectedRows === 0) {
+        const n = await markGroupDeleted(userId, row.id, nowStr);
+        if (n === 0) {
           console.warn('[notes/sync] soft-delete group skipped (0 rows)', row.id, userId);
         }
       }

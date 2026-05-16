@@ -16,6 +16,10 @@ export function AccountPanel({ onClose }: Props) {
   const { userId, target, nickname, token, login, logout } = useAuthStore();
   const [section, setSection] = useState<Section>('main');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showCloseAccount, setShowCloseAccount] = useState(false);
+  const [closeAccountPwd, setCloseAccountPwd] = useState('');
+  const [closeAccountErr, setCloseAccountErr] = useState('');
+  const [closeAccountLoading, setCloseAccountLoading] = useState(false);
 
   // Nickname
   const [editingNickname, setEditingNickname] = useState(false);
@@ -150,6 +154,22 @@ export function AccountPanel({ onClose }: Props) {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  async function handleCloseAccount() {
+    setCloseAccountLoading(true);
+    setCloseAccountErr('');
+    try {
+      await authApi.closeAccount(closeAccountPwd.trim() || undefined);
+      setShowCloseAccount(false);
+      setCloseAccountPwd('');
+      logout();
+      onClose();
+    } catch (e) {
+      setCloseAccountErr(e instanceof ApiError ? e.message : '注销失败');
+    } finally {
+      setCloseAccountLoading(false);
+    }
+  }
+
   const isEmail = (s: string | null) => s && s.includes('@');
 
   return (
@@ -267,6 +287,17 @@ export function AccountPanel({ onClose }: Props) {
                 <LogOut size={15} />
                 退出登录
               </button>
+              <button
+                type="button"
+                className="account-close-account-btn"
+                onClick={() => {
+                  setCloseAccountErr('');
+                  setCloseAccountPwd('');
+                  setShowCloseAccount(true);
+                }}
+              >
+                注销账户
+              </button>
             </div>
           </div>
         )}
@@ -383,6 +414,41 @@ export function AccountPanel({ onClose }: Props) {
       </div>
     </div>
 
+    {showCloseAccount && (
+      <div className="modal-overlay modal-overlay--glass confirm-overlay" onClick={() => !closeAccountLoading && setShowCloseAccount(false)}>
+        <div className="modal-panel confirm-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+          <h3 className="confirm-title">注销账户</h3>
+          <p className="confirm-message" style={{ textAlign: 'left' }}>
+            将标记账户为已删除，云端笔记与分组将不再可用，且无法再次用此邮箱登录。本地浏览器中的文稿文件不受影响。若已设置登录密码，请输入后确认。
+          </p>
+          <div className="auth-field" style={{ marginTop: 12 }}>
+            <label className="auth-label">密码（已设置密码时必填）</label>
+            <input
+              className="auth-input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="未设置密码可留空"
+              value={closeAccountPwd}
+              onChange={(e) => setCloseAccountPwd(e.target.value)}
+            />
+          </div>
+          {closeAccountErr && <p className="auth-error">{closeAccountErr}</p>}
+          <div className="confirm-actions" style={{ marginTop: 16 }}>
+            <button type="button" className="confirm-cancel-btn" disabled={closeAccountLoading} onClick={() => setShowCloseAccount(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="confirm-ok-btn danger"
+              disabled={closeAccountLoading}
+              onClick={() => void handleCloseAccount()}
+            >
+              {closeAccountLoading ? '处理中…' : '确认注销'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     {showLogoutConfirm && (
       <ConfirmDialog
         title="退出登录"

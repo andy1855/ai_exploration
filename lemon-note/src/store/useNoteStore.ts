@@ -4,8 +4,10 @@ import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode, MarkdownP
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { inferTypeAndLanguageFromTitle } from '../utils/inferSheetTypeFromTitle';
-import { loadNotesFromLocalStorage, onChangeSync, flushPushToServer } from '../storage/notePersistence';
+import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
 import { requestCheckpoint } from '../version/versionCheckpoint';
+import { notesApi } from '../api/notes';
+import { ApiError } from '../api/client';
 
 const PREFS_KEY = 'lemon-note-preferences';
 
@@ -195,23 +197,28 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     deleteSheet: (id) => {
-      set((state) => {
-        const sheets = state.sheets.filter((s) => s.id !== id);
-        saveData(sheets, state.groups);
-        return {
-          sheets,
-          selectedSheetId:
-            state.selectedSheetId === id
-              ? sheets.length > 0
-                ? sheets[0].id
-                : null
-              : state.selectedSheetId,
-        };
-      });
-      flushPushToServer(() => {
-        const st = get();
-        return { sheets: st.sheets, groups: st.groups };
-      });
+      void (async () => {
+        try {
+          await notesApi.softDeleteSheet(id);
+        } catch (e) {
+          console.error('[deleteSheet]', e);
+          alert(e instanceof ApiError ? e.message : '删除失败，请检查网络或登录状态');
+          return;
+        }
+        set((state) => {
+          const sheets = state.sheets.filter((s) => s.id !== id);
+          saveData(sheets, state.groups);
+          return {
+            sheets,
+            selectedSheetId:
+              state.selectedSheetId === id
+                ? sheets.length > 0
+                  ? sheets[0].id
+                  : null
+                : state.selectedSheetId,
+          };
+        });
+      })();
     },
 
     moveSheet: (id, groupId) => {
@@ -237,20 +244,25 @@ export const useNoteStore = create<NoteState>((set, get) => {
 
     deleteSheets: (ids) => {
       const idSet = new Set(ids);
-      set((state) => {
-        const sheets = state.sheets.filter((s) => !idSet.has(s.id));
-        saveData(sheets, state.groups);
-        return {
-          sheets,
-          selectedSheetId: idSet.has(state.selectedSheetId ?? '')
-            ? sheets.length > 0 ? sheets[0].id : null
-            : state.selectedSheetId,
-        };
-      });
-      flushPushToServer(() => {
-        const st = get();
-        return { sheets: st.sheets, groups: st.groups };
-      });
+      void (async () => {
+        try {
+          await Promise.all(ids.map((i) => notesApi.softDeleteSheet(i)));
+        } catch (e) {
+          console.error('[deleteSheets]', e);
+          alert(e instanceof ApiError ? e.message : '批量删除失败，请检查网络或登录状态');
+          return;
+        }
+        set((state) => {
+          const sheets = state.sheets.filter((s) => !idSet.has(s.id));
+          saveData(sheets, state.groups);
+          return {
+            sheets,
+            selectedSheetId: idSet.has(state.selectedSheetId ?? '')
+              ? sheets.length > 0 ? sheets[0].id : null
+              : state.selectedSheetId,
+          };
+        });
+      })();
     },
 
     copySheet: (id, groupId) => {
@@ -313,22 +325,27 @@ export const useNoteStore = create<NoteState>((set, get) => {
     },
 
     deleteGroup: (id) => {
-      set((state) => {
-        const groups = state.groups.filter((g) => g.id !== id && g.parentId !== id);
-        const sheets = state.sheets.map((s) =>
-          s.groupId === id ? { ...s, groupId: null } : s
-        );
-        saveData(sheets, groups);
-        return {
-          groups,
-          sheets,
-          selectedGroupId: state.selectedGroupId === id ? null : state.selectedGroupId,
-        };
-      });
-      flushPushToServer(() => {
-        const st = get();
-        return { sheets: st.sheets, groups: st.groups };
-      });
+      void (async () => {
+        try {
+          await notesApi.softDeleteGroup(id);
+        } catch (e) {
+          console.error('[deleteGroup]', e);
+          alert(e instanceof ApiError ? e.message : '删除分组失败，请检查网络或登录状态');
+          return;
+        }
+        set((state) => {
+          const groups = state.groups.filter((g) => g.id !== id && g.parentId !== id);
+          const sheets = state.sheets.map((s) =>
+            s.groupId === id ? { ...s, groupId: null } : s
+          );
+          saveData(sheets, groups);
+          return {
+            groups,
+            sheets,
+            selectedGroupId: state.selectedGroupId === id ? null : state.selectedGroupId,
+          };
+        });
+      })();
     },
 
     selectGroup: (id) => set({ selectedGroupId: id }),
