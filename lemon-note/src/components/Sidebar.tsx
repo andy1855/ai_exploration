@@ -13,11 +13,9 @@ import {
   FilePlus,
   FolderPlus,
   Copy,
-  CheckSquare,
-  Square,
   X,
   MoveRight,
-  Layers,
+  RefreshCw,
 } from 'lucide-react';
 import { CreateSheetModal } from './CreateSheetModal';
 import { MarkdownMIcon } from './MarkdownMIcon';
@@ -25,6 +23,7 @@ import { LanguageIcon } from '../utils/languageUtils';
 import { ContextMenu, useContextMenu } from './ContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import { escapeRegExp, textIncludesQuery } from '../utils/searchUtils';
+import { pullLatestFromServer } from '../storage/notePersistence';
 
 // ─── Highlight helper ─────────────────────────────────────────
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -120,7 +119,6 @@ export function Sidebar() {
     selectGroup,
     createGroup,
     deleteSheet,
-    deleteSheets,
     deleteGroup,
     updateGroup,
     copySheet,
@@ -134,11 +132,7 @@ export function Sidebar() {
   const [createInGroupId, setCreateInGroupId] = useState<string | undefined>(undefined);
   const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-
-  // Multi-select & batch mode
-  const [batchMode, setBatchMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [moveToIds, setMoveToIds] = useState<string[] | null>(null);
 
   // Single-sheet delete confirm
@@ -157,11 +151,6 @@ export function Sidebar() {
   const isSearching = !!searchQuery.trim();
   const filteredSheets = isSearching ? getFilteredSheets() : null;
   const searchCount = filteredSheets?.length ?? 0;
-
-  // Exit batch mode when selection clears
-  useEffect(() => {
-    if (!batchMode) setSelectedIds(new Set());
-  }, [batchMode]);
 
   // 与全局搜索、侧栏清空等保持同步
   useEffect(() => {
@@ -185,30 +174,30 @@ export function Sidebar() {
     setShowCreateModal(true);
   };
 
-  function toggleCheck(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  function toggleSelect(id: string, e: React.MouseEvent) {
-    if (batchMode) {
-      toggleCheck(id);
-    } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
-      e.preventDefault();
-      setBatchMode(true);
-      toggleCheck(id);
+  const handleManualSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const data = await pullLatestFromServer();
+      if (!data) {
+        alert('同步失败，请检查网络或稍后重试。');
+        return;
+      }
+      const prevId = useNoteStore.getState().selectedSheetId;
+      const prevGroupId = useNoteStore.getState().selectedGroupId;
+      const still = prevId && data.sheets.some((s) => s.id === prevId);
+      const groupStill =
+        prevGroupId && data.groups.some((g) => g.id === prevGroupId) ? prevGroupId : null;
+      useNoteStore.setState({
+        sheets: data.sheets,
+        groups: data.groups,
+        selectedSheetId: still ? prevId : (data.sheets[0]?.id ?? null),
+        selectedGroupId: groupStill,
+      });
+    } finally {
+      setSyncing(false);
     }
-  }
-
-  function clearSelection() {
-    setSelectedIds(new Set());
-    setBatchMode(false);
-  }
-
-  // Context menu helpers
+  };
   const handleCtxGroup = (e: React.MouseEvent, groupId: string, groupName: string) => {
     openCtx(e, [
       { label: '新建文稿', icon: <FilePlus size={13} />, onClick: () => openCreateModal(groupId) },
@@ -318,7 +307,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Quick actions + batch mode toggle */}
+      {/* Quick actions + 从服务器同步 */}
       {!isSearching && (
         <div className="sidebar-actions">
           <button className="action-btn" onClick={() => openCreateModal(resolveNewSheetParentGroupId())}>
@@ -328,33 +317,13 @@ export function Sidebar() {
             <Folder size={14} /><span>新建分组</span>
           </button>
           <button
-            className={`action-btn action-btn-icon${batchMode ? ' active' : ''}`}
-            onClick={() => setBatchMode(!batchMode)}
-            title="批量处理"
+            type="button"
+            className="action-btn action-btn-icon"
+            disabled={syncing}
+            onClick={() => void handleManualSync()}
+            title="同步：从服务器获取最新笔记"
           >
-            <Layers size={14} />
-          </button>
-        </div>
-      )}
-
-      {/* Batch actions bar */}
-      {batchMode && (
-        <div className="batch-actions-bar">
-          {selectedIds.size > 0 ? (
-            <>
-              <span className="batch-count">已选 {selectedIds.size} 篇</span>
-              <button className="batch-btn" onClick={() => setMoveToIds(Array.from(selectedIds))} title="移动到">
-                <MoveRight size={13} />
-              </button>
-              <button className="batch-btn danger" onClick={() => setBatchDeleteConfirm(true)} title="批量删除">
-                <Trash2 size={13} />
-              </button>
-            </>
-          ) : (
-            <span className="batch-count batch-hint">点击文稿勾选</span>
-          )}
-          <button className="batch-btn" onClick={clearSelection} title="退出批量模式">
-            <X size={13} />
+            <RefreshCw size={14} className={syncing ? 'save-spin' : ''} />
           </button>
         </div>
       )}
@@ -372,24 +341,15 @@ export function Sidebar() {
                 key={sheet.id}
                 sheet={sheet}
                 isSelected={selectedSheetId === sheet.id}
-                isChecked={selectedIds.has(sheet.id)}
                 isDragging={draggingId === sheet.id}
-                batchMode={batchMode}
                 renamingId={renamingSheetId}
                 renameValue={renameValue}
                 searchQuery={searchQuery}
                 snippet={snippet}
-                onSelect={(e) => {
-                  if (batchMode) {
-                    toggleCheck(sheet.id);
-                  } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                    toggleSelect(sheet.id, e);
-                  } else {
-                    selectSheet(sheet.id);
-                  }
+                onSelect={() => {
+                  selectSheet(sheet.id);
                 }}
                 onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
-                onToggleCheck={() => toggleCheck(sheet.id)}
                 onRenameChange={setRenameValue}
                 onRenameSubmit={() => {
                   if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
@@ -417,8 +377,6 @@ export function Sidebar() {
               level={0}
               selectedSheetId={selectedSheetId}
               selectedGroupId={selectedGroupId}
-              selectedIds={selectedIds}
-              batchMode={batchMode}
               draggingId={draggingId}
               dragOverGroupId={dragOverGroupId}
               editingGroupId={editingGroupId}
@@ -428,8 +386,6 @@ export function Sidebar() {
               searchQuery=""
               onSelectGroup={() => selectGroup(group.id)}
               onSelectSheet={selectSheet}
-              onToggleSelect={toggleSelect}
-              onToggleCheck={toggleCheck}
               onCreateSheetInGroup={(gid) => openCreateModal(gid)}
               onDeleteGroup={() => setDeleteTarget({ id: `group:${group.id}`, title: group.name })}
               onDeleteSheet={(id, title) => setDeleteTarget({ id, title })}
@@ -469,24 +425,15 @@ export function Sidebar() {
                 key={sheet.id}
                 sheet={sheet}
                 isSelected={selectedSheetId === sheet.id}
-                isChecked={selectedIds.has(sheet.id)}
                 isDragging={draggingId === sheet.id}
-                batchMode={batchMode}
                 renamingId={renamingSheetId}
                 renameValue={renameValue}
                 searchQuery=""
                 snippet=""
-                onSelect={(e) => {
-                  if (batchMode) {
-                    toggleCheck(sheet.id);
-                  } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
-                    toggleSelect(sheet.id, e);
-                  } else {
-                    selectSheet(sheet.id);
-                  }
+                onSelect={() => {
+                  selectSheet(sheet.id);
                 }}
                 onContextMenu={(e) => handleCtxSheet(e, sheet.id, sheet.title)}
-                onToggleCheck={() => toggleCheck(sheet.id)}
                 onRenameChange={setRenameValue}
                 onRenameSubmit={() => {
                   if (renameValue.trim()) useNoteStore.getState().updateSheet(sheet.id, { title: renameValue.trim() });
@@ -516,7 +463,7 @@ export function Sidebar() {
         <CreateSheetModal groupId={createInGroupId} onClose={() => setShowCreateModal(false)} />
       )}
       {moveToIds && (
-        <MoveToModal sheetIds={moveToIds} onClose={() => setMoveToIds(null)} onMoved={clearSelection} />
+        <MoveToModal sheetIds={moveToIds} onClose={() => setMoveToIds(null)} />
       )}
 
       {/* Delete confirm */}
@@ -534,16 +481,6 @@ export function Sidebar() {
           onCancel={() => setDeleteTarget(null)}
         />
       )}
-      {batchDeleteConfirm && (
-        <ConfirmDialog
-          title="批量删除"
-          message={`确定删除选中的 ${selectedIds.size} 篇文稿吗？此操作不可恢复。`}
-          confirmText="全部删除"
-          danger
-          onConfirm={() => { deleteSheets(Array.from(selectedIds)); clearSelection(); setBatchDeleteConfirm(false); }}
-          onCancel={() => setBatchDeleteConfirm(false)}
-        />
-      )}
 
       {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.items} onClose={closeCtx} />}
     </aside>
@@ -554,17 +491,14 @@ export function Sidebar() {
 interface SheetItemProps {
   sheet: Sheet;
   isSelected: boolean;
-  isChecked: boolean;
   isDragging: boolean;
-  batchMode: boolean;
   renamingId: string | null;
   renameValue: string;
   searchQuery: string;
   snippet?: string;
   paddingLeft?: number;
-  onSelect: (e: React.MouseEvent) => void;
+  onSelect: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
-  onToggleCheck: () => void;
   onRenameChange: (v: string) => void;
   onRenameSubmit: () => void;
   onRenameCancel: () => void;
@@ -576,9 +510,7 @@ interface SheetItemProps {
 function SheetItem({
   sheet,
   isSelected,
-  isChecked,
   isDragging,
-  batchMode,
   renamingId,
   renameValue,
   searchQuery,
@@ -586,7 +518,6 @@ function SheetItem({
   paddingLeft = 12,
   onSelect,
   onContextMenu,
-  onToggleCheck,
   onRenameChange,
   onRenameSubmit,
   onRenameCancel,
@@ -599,7 +530,7 @@ function SheetItem({
 
   return (
     <div
-      className={`sheet-item ${isSelected ? 'active' : ''} ${isChecked ? 'checked' : ''} ${isDragging ? 'dragging' : ''} ${hasSnippet ? 'has-snippet' : ''}`}
+      className={`sheet-item ${isSelected ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${hasSnippet ? 'has-snippet' : ''}`}
       style={{ paddingLeft }}
       draggable
       onClick={onSelect}
@@ -607,15 +538,6 @@ function SheetItem({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      {batchMode && (
-        <button
-          className="sheet-check-btn"
-          onClick={(e) => { e.stopPropagation(); onToggleCheck(); }}
-          title="选择"
-        >
-          {isChecked ? <CheckSquare size={13} /> : <Square size={13} />}
-        </button>
-      )}
       <span className="sheet-icon">{getSheetIcon(sheet.type, sheet.language)}</span>
       <div className="sheet-info">
         {isRenaming ? (
@@ -661,8 +583,6 @@ interface GroupItemProps {
   level: number;
   selectedGroupId: string | null;
   selectedSheetId: string | null;
-  selectedIds: Set<string>;
-  batchMode: boolean;
   draggingId: string | null;
   dragOverGroupId: string | null | undefined;
   editingGroupId: string | null;
@@ -672,8 +592,6 @@ interface GroupItemProps {
   searchQuery: string;
   onSelectGroup: () => void;
   onSelectSheet: (id: string) => void;
-  onToggleSelect: (id: string, e: React.MouseEvent) => void;
-  onToggleCheck: (id: string) => void;
   onCreateSheetInGroup: (groupId: string) => void;
   onDeleteGroup: () => void;
   onDeleteSheet: (id: string, title: string) => void;
@@ -700,10 +618,10 @@ function getSheetIcon(type?: string, language?: string | null) {
 }
 
 function GroupItem({
-  group, level, selectedGroupId, selectedSheetId, selectedIds,
-  batchMode, draggingId, dragOverGroupId, editingGroupId, editName,
+  group, level, selectedGroupId, selectedSheetId,
+  draggingId, dragOverGroupId, editingGroupId, editName,
   renamingSheetId, renameValue, searchQuery,
-  onSelectGroup, onSelectSheet, onToggleSelect, onToggleCheck,
+  onSelectGroup, onSelectSheet,
   onCreateSheetInGroup, onDeleteGroup, onDeleteSheet,
   onEditNameChange, onSubmitEdit, onKeyDown, onSetEditingGroupId,
   onContextMenuGroup, onContextMenuSheet,
@@ -800,8 +718,6 @@ function GroupItem({
                   level={level + 1}
                   selectedGroupId={selectedGroupId}
                   selectedSheetId={selectedSheetId}
-                  selectedIds={selectedIds}
-                  batchMode={batchMode}
                   draggingId={draggingId}
                   dragOverGroupId={dragOverGroupId}
                   editingGroupId={editingGroupId}
@@ -811,8 +727,6 @@ function GroupItem({
                   searchQuery={searchQuery}
                   onSelectGroup={() => useNoteStore.getState().selectGroup(cg.id)}
                   onSelectSheet={onSelectSheet}
-                  onToggleSelect={onToggleSelect}
-                  onToggleCheck={onToggleCheck}
                   onCreateSheetInGroup={onCreateSheetInGroup}
                   onDeleteGroup={() => useNoteStore.getState().deleteGroup(cg.id)}
                   onDeleteSheet={onDeleteSheet}
@@ -847,24 +761,15 @@ function GroupItem({
                   key={sheet.id}
                   sheet={sheet}
                   isSelected={selectedSheetId === sheet.id}
-                  isChecked={selectedIds.has(sheet.id)}
                   isDragging={draggingId === sheet.id}
-                  batchMode={batchMode}
                   renamingId={renamingSheetId}
                   renameValue={renameValue}
                   searchQuery={searchQuery}
                   snippet=""
-                  onSelect={(e) => {
-                    if (batchMode) {
-                      onToggleCheck(sheet.id);
-                    } else if (e.ctrlKey || e.metaKey || e.shiftKey || selectedIds.size > 0) {
-                      onToggleSelect(sheet.id, e);
-                    } else {
-                      onSelectSheet(sheet.id);
-                    }
+                  onSelect={() => {
+                    onSelectSheet(sheet.id);
                   }}
                   onContextMenu={(e) => onContextMenuSheet?.(e, sheet.id, sheet.title)}
-                  onToggleCheck={() => onToggleCheck(sheet.id)}
                   onRenameChange={onRenameChange}
                   onRenameSubmit={() => onRenameSubmit(sheet.id)}
                   onRenameCancel={onRenameCancel}

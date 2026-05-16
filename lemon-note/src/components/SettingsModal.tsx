@@ -51,7 +51,6 @@ const SHORTCUTS = [
   { keys: '双击分组名', desc: '重命名分组' },
   { keys: '右键文稿/分组', desc: '上下文菜单' },
   { keys: '拖拽文稿', desc: '移动文稿到分组' },
-  { keys: '⌘ 点击', desc: '多选文稿（进入批量模式）' },
 ];
 
 export function SettingsModal({ onClose }: Props) {

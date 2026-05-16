@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode, MarkdownPreviewMode } from '../types';
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
+import { inferTypeAndLanguageFromTitle } from '../utils/inferSheetTypeFromTitle';
 import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
 import { requestCheckpoint } from '../version/versionCheckpoint';
 
@@ -169,11 +170,17 @@ export const useNoteStore = create<NoteState>((set, get) => {
       set((state) => {
         const sheets = state.sheets.map((s) => {
           if (s.id !== id) return s;
+          const inferred =
+            updates.title !== undefined ? inferTypeAndLanguageFromTitle(updates.title) : null;
           const updated = {
             ...s,
             ...updates,
             updatedAt: Date.now(),
           };
+          if (inferred) {
+            updated.type = inferred.type;
+            updated.language = inferred.language;
+          }
           if (updates.content !== undefined) {
             const wc = countWords(updates.content);
             updated.wordCount = wc.total;

@@ -214,6 +214,16 @@ async function fetchFromServer(): Promise<{ sheets: Sheet[]; groups: Group[] } |
 }
 
 /**
+ * 手动从服务器拉取最新笔记并写入本地缓存（以服务端数据为准）。
+ */
+export async function pullLatestFromServer(): Promise<{ sheets: Sheet[]; groups: Group[] } | null> {
+  const data = await fetchFromServer();
+  if (data === null) return null;
+  await persistNotes(data.sheets, data.groups);
+  return data;
+}
+
+/**
  * 将本地数据推送到服务器（全量覆盖）。
  */
 async function pushToServer(sheets: Sheet[], groups: Group[]) {
