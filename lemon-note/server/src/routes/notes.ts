@@ -20,7 +20,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     `SELECT id, title, content, type, language, group_id, pinned,
             word_count, chinese_count, english_count, created_at, updated_at
      FROM sheets
-     WHERE user_id = ? AND (is_deleted IS NULL OR is_deleted = 0)
+     WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)
      ORDER BY updated_at DESC`,
     [userId]
   );
@@ -28,7 +28,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   const groups = await dbAll<Record<string, unknown>>(
     `SELECT id, name, icon, color, parent_id, \`order\`, collapsed
      FROM note_groups
-     WHERE user_id = ? AND (is_deleted IS NULL OR is_deleted = 0)
+     WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)
      ORDER BY \`order\` ASC`,
     [userId]
   );
@@ -93,14 +93,14 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
 
   if (Array.isArray(sheets)) {
     const aliveRows = await dbAll<{ id: string }>(
-      `SELECT id FROM sheets WHERE user_id = ? AND (is_deleted IS NULL OR is_deleted = 0)`,
+      `SELECT id FROM sheets WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)`,
       [userId]
     );
     const clientIds = new Set(sheets.map((s) => s.id));
     for (const row of aliveRows) {
       if (!clientIds.has(row.id)) {
         await dbRun(
-          `UPDATE sheets SET is_deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ?`,
+          `UPDATE sheets SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ?`,
           [nowStr, row.id, userId]
         );
       }
@@ -111,14 +111,14 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
       const uAt = msToDbTimestamp(s.updatedAt ?? Date.now());
       await dbRun(
         `INSERT INTO sheets (id, user_id, title, content, type, language, group_id, pinned,
-                             word_count, chinese_count, english_count, created_at, updated_at, is_deleted, deleted_at)
+                             word_count, chinese_count, english_count, created_at, updated_at, deleted, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
          ON DUPLICATE KEY UPDATE
            title = VALUES(title), content = VALUES(content), type = VALUES(type),
            language = VALUES(language), group_id = VALUES(group_id), pinned = VALUES(pinned),
            word_count = VALUES(word_count), chinese_count = VALUES(chinese_count),
            english_count = VALUES(english_count), updated_at = VALUES(updated_at),
-           is_deleted = 0, deleted_at = NULL,
+           deleted = 0, deleted_at = NULL,
            created_at = COALESCE(NULLIF(TRIM(CAST(created_at AS CHAR)), ''), VALUES(created_at))`,
         [
           s.id,
@@ -141,14 +141,14 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
 
   if (Array.isArray(groups)) {
     const aliveGroups = await dbAll<{ id: string }>(
-      `SELECT id FROM note_groups WHERE user_id = ? AND (is_deleted IS NULL OR is_deleted = 0)`,
+      `SELECT id FROM note_groups WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)`,
       [userId]
     );
     const clientGids = new Set(groups.map((g) => g.id));
     for (const row of aliveGroups) {
       if (!clientGids.has(row.id)) {
         await dbRun(
-          `UPDATE note_groups SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+          `UPDATE note_groups SET deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
           [nowStr, nowStr, row.id, userId]
         );
       }
@@ -157,12 +157,12 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
     const gNow = formatDbTimestamp();
     for (const g of groups) {
       await dbRun(
-        `INSERT INTO note_groups (id, user_id, name, icon, color, parent_id, \`order\`, collapsed, created_at, updated_at, is_deleted, deleted_at)
+        `INSERT INTO note_groups (id, user_id, name, icon, color, parent_id, \`order\`, collapsed, created_at, updated_at, deleted, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name), icon = VALUES(icon), color = VALUES(color),
            parent_id = VALUES(parent_id), \`order\` = VALUES(\`order\`), collapsed = VALUES(collapsed),
-           updated_at = VALUES(updated_at), is_deleted = 0, deleted_at = NULL,
+           updated_at = VALUES(updated_at), deleted = 0, deleted_at = NULL,
            created_at = IFNULL(note_groups.created_at, VALUES(created_at))`,
         [
           g.id,
@@ -192,8 +192,8 @@ router.post('/versions', async (req: Request, res: Response): Promise<void> => {
 
   const vAt = formatDbTimestamp();
   await dbRun(
-    `INSERT INTO sheet_versions (sheet_id, user_id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sheet_versions (sheet_id, user_id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at, deleted, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
     [
       sheetId,
       userId,
@@ -208,6 +208,7 @@ router.post('/versions', async (req: Request, res: Response): Promise<void> => {
       vAt,
     ]
   );
+
 
   const cutoff = twoMonthsAgoDbTimestamp();
   await dbRun(`DELETE FROM sheet_versions WHERE user_id = ? AND created_at < ?`, [userId, cutoff]);
@@ -229,7 +230,7 @@ router.get('/versions/:sheetId', async (req: Request, res: Response): Promise<vo
   const userId = req.user!.userId;
   const versions = await dbAll(
     `SELECT id, title, content, type, language, group_id, word_count, chinese_count, english_count, created_at
-     FROM sheet_versions WHERE sheet_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50`,
+     FROM sheet_versions WHERE sheet_id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY created_at DESC LIMIT 50`,
     [req.params.sheetId, userId]
   );
   res.json({
@@ -264,14 +265,15 @@ router.post('/versions/restore/:versionId', async (req: Request, res: Response):
     created_at: string | number;
   };
   const version = await dbGet<VersionRow>(
-    'SELECT * FROM sheet_versions WHERE id = ? AND user_id = ?',
+    'SELECT * FROM sheet_versions WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0)',
     [Number(req.params.versionId), userId]
   );
   if (!version) { res.status(404).json({ error: '版本不存在' }); return; }
 
   await dbRun(
     `UPDATE sheets SET title = ?, content = ?, type = ?, language = ?, group_id = ?,
-      word_count = ?, chinese_count = ?, english_count = ?, updated_at = ?
+      word_count = ?, chinese_count = ?, english_count = ?, updated_at = ?,
+      deleted = 0, deleted_at = NULL
      WHERE id = ? AND user_id = ?`,
     [
       version.title,

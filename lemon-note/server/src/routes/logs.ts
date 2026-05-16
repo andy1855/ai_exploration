@@ -12,12 +12,12 @@ router.get('/', authenticate, async (req: Request, res: Response): Promise<void>
 
   const logs = await dbAll<Record<string, unknown>>(
     `SELECT id, target, method, ip, user_agent, device_info, success, fail_reason, created_at
-     FROM login_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+     FROM login_logs WHERE user_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     [req.user!.userId, limit, offset]
   );
 
   const total = await dbGet<{ cnt: number }>(
-    'SELECT count(*) as cnt FROM login_logs WHERE user_id = ?', [req.user!.userId]);
+    'SELECT count(*) as cnt FROM login_logs WHERE user_id = ? AND (deleted IS NULL OR deleted = 0)', [req.user!.userId]);
 
   res.json({
     logs: logs.map((row) => ({

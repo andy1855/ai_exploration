@@ -31,8 +31,8 @@ async function recordLog(params: {
   req: Request; success: boolean; failReason?: string; deviceInfo?: string;
 }) {
   await dbRun(
-    `INSERT INTO login_logs (user_id, target, method, ip, user_agent, device_info, success, fail_reason, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO login_logs (user_id, target, method, ip, user_agent, device_info, success, fail_reason, created_at, deleted, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
     [params.userId, params.target, params.method, getIp(params.req),
      params.req.headers['user-agent'] ?? '', params.deviceInfo ?? null,
      params.success ? 1 : 0, params.failReason ?? null, formatDbTimestamp()]
@@ -53,7 +53,7 @@ router.post('/send-code', async (req: Request, res: Response): Promise<void> => 
   const expiresAtStr = formatDbTimestamp(new Date(Date.now() + CODE_TTL * 1000));
   const createdAtStr = formatDbTimestamp();
   await dbRun(
-    'INSERT INTO verification_codes (target, code, type, purpose, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO verification_codes (target, code, type, purpose, expires_at, created_at, deleted, deleted_at) VALUES (?, ?, ?, ?, ?, ?, 0, NULL)',
     [target, code, 'email', purpose, expiresAtStr, createdAtStr]
   );
 
@@ -80,7 +80,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
      AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1`, [target, code, nowFmt]);
   if (!record) { res.status(400).json({ error: '验证码错误或已过期' }); return; }
 
-  const existing = await dbGet('SELECT id FROM users WHERE email = ?', [target]);
+  const existing = await dbGet('SELECT id FROM users WHERE email = ? AND (deleted IS NULL OR deleted = 0)', [target]);
   if (existing) { res.status(409).json({ error: '该邮箱已注册，请直接登录' }); return; }
 
   let finalNickname: string;
@@ -92,7 +92,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
   const regAt = formatDbTimestamp();
-  const result = await dbRun('INSERT INTO users (email, phone, password, nickname, created_at) VALUES (?, NULL, ?, ?, ?)',
+  const result = await dbRun('INSERT INTO users (email, phone, password, nickname, created_at, deleted, deleted_at) VALUES (?, NULL, ?, ?, ?, 0, NULL)',
     [target, passwordHash, finalNickname, regAt]);
   const userId = result.insertId!;
   await dbRun('UPDATE verification_codes SET used = 1 WHERE id = ?', [record.id]);
@@ -114,7 +114,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   if (!isEmail(target)) { res.status(400).json({ error: '请输入有效的邮箱地址' }); return; }
 
   const user = await dbGet<{ id: number; email: string | null; phone: string | null; password: string | null; nickname: string | null }>(
-    'SELECT * FROM users WHERE email = ?', [target]);
+    'SELECT * FROM users WHERE email = ? AND (deleted IS NULL OR deleted = 0)', [target]);
   if (!user) {
     await recordLog({ userId: null, target, method, req, success: false, failReason: '用户不存在' });
     res.status(401).json({ error: '账号不存在，请先注册' }); return;
@@ -152,7 +152,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 router.get('/me', authenticate, async (req: Request, res: Response): Promise<void> => {
-  const me = await dbGet<Record<string, unknown>>('SELECT id, email, phone, nickname, created_at FROM users WHERE id = ?', [req.user!.userId]);
+  const me = await dbGet<Record<string, unknown>>('SELECT id, email, phone, nickname, created_at FROM users WHERE id = ? AND (deleted IS NULL OR deleted = 0)', [req.user!.userId]);
   if (!me) { res.status(404).json({ error: '用户不存在' }); return; }
   res.json({
     ...me,
@@ -163,7 +163,7 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
 router.post('/change-password', authenticate, async (req: Request, res: Response): Promise<void> => {
   const { oldPassword, newPassword } = req.body as { oldPassword?: string; newPassword: string };
   if (!newPassword || newPassword.length < 6) { res.status(400).json({ error: '密码至少6位' }); return; }
-  const user = await dbGet<{ password: string | null }>('SELECT * FROM users WHERE id = ?', [req.user!.userId]);
+  const user = await dbGet<{ password: string | null }>('SELECT * FROM users WHERE id = ? AND (deleted IS NULL OR deleted = 0)', [req.user!.userId]);
   if (!user) { res.status(404).json({ error: '用户不存在' }); return; }
   if (user.password && oldPassword) {
     const ok = await bcrypt.compare(oldPassword, user.password);
@@ -191,7 +191,7 @@ router.post('/change-email', authenticate, async (req: Request, res: Response): 
     `SELECT * FROM verification_codes WHERE target = ? AND code = ? AND purpose = 'register'
      AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1`, [newEmail, code, nowFmt]);
   if (!record) { res.status(400).json({ error: '验证码错误或已过期' }); return; }
-  const existing = await dbGet('SELECT id FROM users WHERE email = ?', [newEmail]);
+  const existing = await dbGet('SELECT id FROM users WHERE email = ? AND (deleted IS NULL OR deleted = 0)', [newEmail]);
   if (existing) { res.status(409).json({ error: '该邮箱已被使用' }); return; }
   await dbRun('UPDATE users SET email = ? WHERE id = ?', [newEmail, req.user!.userId]);
   await dbRun('UPDATE verification_codes SET used = 1 WHERE id = ?', [record.id]);
