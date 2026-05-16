@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { X, User, Mail, Lock, Hash, Copy, Check, Send, Clock, Eye, EyeOff, Pencil } from 'lucide-react';
+import { X, User, Mail, Lock, Hash, Copy, Check, Send, Clock, Eye, EyeOff, Pencil, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../api/auth';
 import { ApiError } from '../api/client';
 import { validateNickname, sanitizeNicknameInput } from '../utils/nicknameUtils';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
   onClose: () => void;
@@ -12,8 +13,9 @@ interface Props {
 type Section = 'main' | 'change-email' | 'change-password';
 
 export function AccountPanel({ onClose }: Props) {
-  const { userId, target, nickname, token, login } = useAuthStore();
+  const { userId, target, nickname, token, login, logout } = useAuthStore();
   const [section, setSection] = useState<Section>('main');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Nickname
   const [editingNickname, setEditingNickname] = useState(false);
@@ -151,8 +153,9 @@ export function AccountPanel({ onClose }: Props) {
   const isEmail = (s: string | null) => s && s.includes('@');
 
   return (
-    <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
-      <div className="modal-content account-modal modal-panel" onClick={(e) => e.stopPropagation()}>
+    <>
+      <div className="modal-overlay modal-overlay--glass" onClick={onClose}>
+        <div className="modal-content account-modal modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-title">
             <User size={16} />
@@ -253,6 +256,17 @@ export function AccountPanel({ onClose }: Props) {
                   {isEmail(target) ? '修改密码' : '设置密码'}
                 </button>
               </div>
+            </div>
+
+            <div className="account-logout-zone">
+              <button
+                type="button"
+                className="account-logout-btn"
+                onClick={() => setShowLogoutConfirm(true)}
+              >
+                <LogOut size={15} />
+                退出登录
+              </button>
             </div>
           </div>
         )}
@@ -368,5 +382,21 @@ export function AccountPanel({ onClose }: Props) {
         )}
       </div>
     </div>
+
+    {showLogoutConfirm && (
+      <ConfirmDialog
+        title="退出登录"
+        message="确定要退出当前账户吗？未同步的本地草稿仍保留在本机。"
+        confirmText="退出登录"
+        danger
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          logout();
+          onClose();
+        }}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
+    )}
+  </>
   );
 }

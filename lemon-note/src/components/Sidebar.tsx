@@ -125,6 +125,7 @@ export function Sidebar() {
     updateGroup,
     copySheet,
     setSearchQuery,
+    resolveNewSheetParentGroupId,
   } = useNoteStore();
 
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -320,7 +321,7 @@ export function Sidebar() {
       {/* Quick actions + batch mode toggle */}
       {!isSearching && (
         <div className="sidebar-actions">
-          <button className="action-btn" onClick={() => openCreateModal()}>
+          <button className="action-btn" onClick={() => openCreateModal(resolveNewSheetParentGroupId())}>
             <Plus size={14} /><span>新建文稿</span>
           </button>
           <button className="action-btn" onClick={() => createGroup('新建分组', null)}>

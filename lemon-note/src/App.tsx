@@ -9,7 +9,7 @@ import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { useNoteStore } from './store/useNoteStore';
 import { useAuthStore } from './store/useAuthStore';
 import {
-  Sun, Moon, Settings, LogOut, User, Shield, PanelLeftOpen, PanelLeftClose,
+  Sun, Moon, Settings, User, Shield, PanelLeftOpen, PanelLeftClose,
 } from 'lucide-react';
 import './styles/global.css';
 
@@ -24,7 +24,7 @@ function applyTheme(theme: string) {
 
 function App() {
   const { preferences, updatePreferences } = useNoteStore();
-  const { isLoggedIn, nickname, target, logout } = useAuthStore();
+  const { isLoggedIn, nickname, target } = useAuthStore();
 
   const [showSettings, setShowSettings] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
@@ -134,9 +134,6 @@ function App() {
           </button>
           <button className="icon-btn" onClick={() => setShowSettings(true)} title="设置">
             <Settings size={16} />
-          </button>
-          <button className="icon-btn topbar-logout" onClick={logout} title="退出登录">
-            <LogOut size={16} />
           </button>
         </div>
       </header>

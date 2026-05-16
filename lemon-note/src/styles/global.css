@@ -1509,6 +1509,12 @@ a {
   color: var(--text-secondary) !important;
 }
 
+/* Markdown：编辑 / 分栏 / 预览（与右侧模式开关并排时略紧凑） */
+.editor-md-preview-switch .mode-chip {
+  padding: 5px 7px;
+  gap: 4px;
+}
+
 .settings-prose {
   font-size: 13px;
   line-height: 1.65;
@@ -2517,6 +2523,33 @@ a {
 
 .account-row:last-child {
   border-bottom: none;
+}
+
+.account-logout-zone {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.account-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.account-logout-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger-hover);
+  background: var(--bg-primary);
 }
 
 .account-row-label {

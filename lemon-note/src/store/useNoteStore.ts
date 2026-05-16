@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode } from '../types';
+import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode, MarkdownPreviewMode } from '../types';
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
@@ -28,7 +28,13 @@ function loadPreferences(): AppPreferences {
       }
       delete saved.focusMode;
       delete saved.typewriterMode;
-      return { ...defaultPreferences, ...saved, editorViewMode } as AppPreferences;
+      let markdownPreviewMode: MarkdownPreviewMode =
+        (saved.markdownPreviewMode as MarkdownPreviewMode) ?? 'split';
+      if (saved.markdownPreviewMode == null && typeof saved.showPreview === 'boolean') {
+        markdownPreviewMode = saved.showPreview ? 'split' : 'edit';
+      }
+      delete saved.showPreview;
+      return { ...defaultPreferences, ...saved, editorViewMode, markdownPreviewMode } as AppPreferences;
     }
   } catch {}
   return { ...defaultPreferences };
@@ -41,7 +47,7 @@ const defaultPreferences: AppPreferences = {
   editorFontFamily: 'system',
   lineHeight: 1.8,
   letterSpacing: 0,
-  showPreview: true,
+  markdownPreviewMode: 'split',
   editorViewMode: 'default',
   showWordCount: true,
   sidebarCollapsed: false,
@@ -78,6 +84,8 @@ interface NoteState {
   searchQuery: string;
 
   // Sheet actions
+  /** 新建文稿时默认归属的分组（当前选中目录，或当前文稿所在目录） */
+  resolveNewSheetParentGroupId: () => string | undefined;
   createSheet: (groupId?: string, type?: SheetType, language?: string | null) => string;
   updateSheet: (id: string, updates: Partial<Sheet>) => void;
   deleteSheet: (id: string) => void;
@@ -116,6 +124,15 @@ export const useNoteStore = create<NoteState>((set, get) => {
     selectedGroupId: null,
     preferences: initialPrefs,
     searchQuery: '',
+
+    resolveNewSheetParentGroupId: () => {
+      const state = get();
+      if (state.selectedGroupId) return state.selectedGroupId;
+      if (state.selectedSheetId) {
+        return state.sheets.find((s) => s.id === state.selectedSheetId)?.groupId ?? undefined;
+      }
+      return undefined;
+    },
 
     createSheet: (groupId?: string, type: SheetType = 'plain', language?: string | null) => {
       const now = Date.now();

@@ -2,10 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } fr
 import MDEditor from '@uiw/react-md-editor';
 import { LemonLogo } from './LemonLogo';
 import { useNoteStore } from '../store/useNoteStore';
-import type { EditorViewMode } from '../types';
+import type { EditorViewMode, MarkdownPreviewMode } from '../types';
 import {
-  Eye,
-  EyeOff,
   Trash2,
   FileText,
   File,
@@ -29,6 +27,9 @@ import {
   LayoutTemplate,
   Focus,
   Clock,
+  PenLine,
+  Columns2,
+  BookOpen,
 } from 'lucide-react';
 import { CodeEditor } from './CodeEditor';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -181,32 +182,28 @@ export function Editor() {
     setContent(sheet?.content ?? '');
   }, [sheet?.id, sheet?.title, sheet?.content]);
 
-  /** 在 Markdown 编辑器的预览区 / 编辑区注入搜索高亮 */
+  /** 在 Markdown 预览区注入搜索高亮（不向 .w-md-editor-text-pre 注入，以免破坏 CodeMirror 光标同步） */
   const applyMarkdownSearchMarks = useCallback(() => {
     const root = editorContainerRef.current;
     if (!root || !isMarkdown) return;
     const q = searchQuery.trim();
     if (!q) return;
 
-    if (preferences.showPreview) {
-      const preview = root.querySelector('.wmde-markdown');
-      if (preview) {
-        injectSearchMarksIntoRoot(preview, q, (t) => inSkippableContext(t, preview));
-      }
-    }
+    const mode = preferences.markdownPreviewMode;
+    if (mode === 'edit') return;
 
-    const pre = root.querySelector('.w-md-editor-text-pre');
-    if (pre) {
-      injectSearchMarksIntoRoot(pre as Element, q, (t) => inSkippableContext(t, pre as Element));
+    const preview = root.querySelector('.wmde-markdown');
+    if (preview) {
+      injectSearchMarksIntoRoot(preview, q, (t) => inSkippableContext(t, preview));
     }
-  }, [isMarkdown, searchQuery, preferences.showPreview]);
+  }, [isMarkdown, searchQuery, preferences.markdownPreviewMode]);
 
   // Markdown / 预览：注入全部黄色高亮（随正文编辑刷新）
   // 使用 useLayoutEffect 确保在浏览器绘制前注入
   useLayoutEffect(() => {
     if (!sheet || !isMarkdown) return;
     applyMarkdownSearchMarks();
-  }, [content, searchQuery, sheet, isMarkdown, preferences.showPreview, applyMarkdownSearchMarks]);
+  }, [content, searchQuery, sheet, isMarkdown, preferences.markdownPreviewMode, applyMarkdownSearchMarks]);
 
   // 由于 @uiw/react-md-editor 的预览是异步渲染的，会在 useLayoutEffect 之后
   // 重新渲染 DOM，清除掉我们注入的 <mark>。用 MutationObserver 兜底。
@@ -243,7 +240,7 @@ export function Editor() {
         cancelAnimationFrame(applyMarksTimerRef.current);
       }
     };
-  }, [isMarkdown, searchQuery, sheet?.id, preferences.showPreview, applyMarkdownSearchMarks]);
+  }, [isMarkdown, searchQuery, sheet?.id, preferences.markdownPreviewMode, applyMarkdownSearchMarks]);
 
   // 切换文档或搜索词变化时：滚动到第一处匹配（避免每次输入内容时重滚）
   useLayoutEffect(() => {
@@ -262,13 +259,14 @@ export function Editor() {
 
     const run = () => {
       if (isMarkdown) {
-        if (preferences.showPreview) {
+        const mdMode = preferences.markdownPreviewMode;
+        if (mdMode !== 'edit') {
           const first = root.querySelector('.wmde-markdown mark.editor-search-hl');
           first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
         const ta = root.querySelector('.w-md-editor-text-input') as HTMLTextAreaElement | null;
         const hasPreviewMark = !!root.querySelector('.wmde-markdown mark.editor-search-hl');
-        if (ta && (!preferences.showPreview || !hasPreviewMark)) {
+        if (ta && (mdMode === 'edit' || !hasPreviewMark)) {
           const idx = findFirstMatchIndex(ta.value, q);
           if (idx >= 0) scrollTextareaToIndex(ta, idx);
         }
@@ -284,7 +282,7 @@ export function Editor() {
     } else {
       run();
     }
-  }, [sheet?.id, searchQuery, isMarkdown, isCode, preferences.showPreview]);
+  }, [sheet?.id, searchQuery, isMarkdown, isCode, preferences.markdownPreviewMode]);
 
   // 纯文本：搜索高亮层与 textarea 滚动同步
   useEffect(() => {
@@ -397,7 +395,8 @@ export function Editor() {
     });
   }, [handleContentChange, applyTypewriterScroll]);
 
-  const togglePreview = () => updatePreferences({ showPreview: !preferences.showPreview });
+  const setMarkdownPreviewMode = (markdownPreviewMode: MarkdownPreviewMode) =>
+    updatePreferences({ markdownPreviewMode });
   const setEditorViewMode = (editorViewMode: EditorViewMode) => updatePreferences({ editorViewMode });
   const toggleFullscreen = () => updatePreferences({ fullscreen: !preferences.fullscreen });
   const toggleFormattingBar = () => updatePreferences({ formattingBarCollapsed: !preferences.formattingBarCollapsed });
@@ -436,7 +435,10 @@ export function Editor() {
         <p>选择一个文稿开始编辑，或创建一个新文稿</p>
         <button
           className="primary-btn"
-          onClick={() => useNoteStore.getState().createSheet()}
+          onClick={() => {
+            const gid = useNoteStore.getState().resolveNewSheetParentGroupId();
+            useNoteStore.getState().createSheet(gid);
+          }}
         >
           新建文稿
         </button>
@@ -445,10 +447,15 @@ export function Editor() {
   }
 
   const isDark = preferences.theme === 'dark';
-  const showFormattingBar = isMarkdown && !preferences.formattingBarCollapsed;
+  const showFormattingBar =
+    isMarkdown &&
+    !preferences.formattingBarCollapsed &&
+    preferences.markdownPreviewMode !== 'preview';
   const chineseCount = liveWordCount.chinese;
   const englishCount = liveWordCount.english;
   const viewMode = preferences.editorViewMode;
+  const mdMode = preferences.markdownPreviewMode;
+  const mdEditorPreview = mdMode === 'edit' ? 'edit' : mdMode === 'split' ? 'live' : 'preview';
 
   return (
     <div
@@ -514,13 +521,32 @@ export function Editor() {
             </button>
           )}
           {isMarkdown && (
-            <button
-              className={`toolbar-btn ${preferences.showPreview ? 'active' : ''}`}
-              onClick={togglePreview}
-              title={preferences.showPreview ? '隐藏预览' : '显示预览'}
-            >
-              {preferences.showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
-            </button>
+            <div className="editor-mode-switch editor-md-preview-switch" title="Markdown：编辑 / 分栏预览 / 仅预览">
+              <button
+                type="button"
+                className={`mode-chip${mdMode === 'edit' ? ' active' : ''}`}
+                onClick={() => setMarkdownPreviewMode('edit')}
+              >
+                <PenLine size={14} />
+                <span>编辑</span>
+              </button>
+              <button
+                type="button"
+                className={`mode-chip${mdMode === 'split' ? ' active' : ''}`}
+                onClick={() => setMarkdownPreviewMode('split')}
+              >
+                <Columns2 size={14} />
+                <span>分栏</span>
+              </button>
+              <button
+                type="button"
+                className={`mode-chip${mdMode === 'preview' ? ' active' : ''}`}
+                onClick={() => setMarkdownPreviewMode('preview')}
+              >
+                <BookOpen size={14} />
+                <span>预览</span>
+              </button>
+            </div>
           )}
           <div className="editor-mode-switch" title="专注：界面极简；打字机：光标行居中">
             <button
@@ -610,7 +636,7 @@ export function Editor() {
           <MDEditor
             value={content}
             onChange={handleContentChange}
-            preview={preferences.showPreview ? 'live' : 'edit'}
+            preview={mdEditorPreview}
             height="100%"
             visibleDragbar={false}
             highlightEnable={true}
