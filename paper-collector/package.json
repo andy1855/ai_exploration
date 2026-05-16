@@ -1,17 +1,30 @@
 {
-  "name": "erase-subagent",
-  "version": "1.0.0",
-  "description": "Cursor SDK subagent for exam-paper handwriting erasure",
+  "name": "paper-collector",
+  "private": true,
+  "version": "0.1.0",
+  "description": "试卷收集：Web 目录笔迹擦除/错题整理 + Cursor SDK 与 Python 离线擦除",
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc -p web/tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
     "erase": "tsx erase_subagent.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.12"
+    "@cursor/sdk": "^1.0.12",
+    "docx": "^9.2.0",
+    "jspdf": "^2.5.2",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "tsx": "^4.21.0",
-    "typescript": "^5.8.3",
-    "@types/node": "^22.15.3"
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1"
   }
 }
