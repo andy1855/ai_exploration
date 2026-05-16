@@ -61,6 +61,6 @@ third-party-libs/
 docs/
 
 # Generated output & large input data
-wrong-answers-collector/cleaned/
-wrong-answers-collector/raw.jpg
-wrong-answers-collector/*.png
+paper-collector/cleaned/
+paper-collector/raw.jpg
+paper-collector/*.png
