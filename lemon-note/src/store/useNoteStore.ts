@@ -4,7 +4,7 @@ import type { Sheet, Group, AppPreferences, SheetType, EditorViewMode, MarkdownP
 import { getLanguageExtName } from '../utils/languageUtils';
 import { textIncludesQuery } from '../utils/searchUtils';
 import { inferTypeAndLanguageFromTitle } from '../utils/inferSheetTypeFromTitle';
-import { loadNotesFromLocalStorage, onChangeSync } from '../storage/notePersistence';
+import { loadNotesFromLocalStorage, onChangeSync, flushPushToServer } from '../storage/notePersistence';
 import { requestCheckpoint } from '../version/versionCheckpoint';
 
 const PREFS_KEY = 'lemon-note-preferences';
@@ -208,6 +208,10 @@ export const useNoteStore = create<NoteState>((set, get) => {
               : state.selectedSheetId,
         };
       });
+      flushPushToServer(() => {
+        const st = get();
+        return { sheets: st.sheets, groups: st.groups };
+      });
     },
 
     moveSheet: (id, groupId) => {
@@ -242,6 +246,10 @@ export const useNoteStore = create<NoteState>((set, get) => {
             ? sheets.length > 0 ? sheets[0].id : null
             : state.selectedSheetId,
         };
+      });
+      flushPushToServer(() => {
+        const st = get();
+        return { sheets: st.sheets, groups: st.groups };
       });
     },
 
@@ -316,6 +324,10 @@ export const useNoteStore = create<NoteState>((set, get) => {
           sheets,
           selectedGroupId: state.selectedGroupId === id ? null : state.selectedGroupId,
         };
+      });
+      flushPushToServer(() => {
+        const st = get();
+        return { sheets: st.sheets, groups: st.groups };
       });
     },
 

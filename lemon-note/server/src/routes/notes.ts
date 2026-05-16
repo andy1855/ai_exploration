@@ -99,10 +99,13 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
     const clientIds = new Set(sheets.map((s) => s.id));
     for (const row of aliveRows) {
       if (!clientIds.has(row.id)) {
-        await dbRun(
-          `UPDATE sheets SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ?`,
+        const r = await dbRun(
+          `UPDATE sheets SET deleted = 1, deleted_at = ? WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0)`,
           [nowStr, row.id, userId]
         );
+        if (r.affectedRows === 0) {
+          console.warn('[notes/sync] soft-delete sheet skipped (0 rows)', row.id, userId);
+        }
       }
     }
 
@@ -147,10 +150,13 @@ router.put('/', async (req: Request, res: Response): Promise<void> => {
     const clientGids = new Set(groups.map((g) => g.id));
     for (const row of aliveGroups) {
       if (!clientGids.has(row.id)) {
-        await dbRun(
-          `UPDATE note_groups SET deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+        const r = await dbRun(
+          `UPDATE note_groups SET deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = 0)`,
           [nowStr, nowStr, row.id, userId]
         );
+        if (r.affectedRows === 0) {
+          console.warn('[notes/sync] soft-delete group skipped (0 rows)', row.id, userId);
+        }
       }
     }
 

@@ -235,7 +235,7 @@ async function pushToServer(sheets: Sheet[], groups: Group[]) {
   try {
     await notesApi.syncAll({ sheets, groups });
   } catch (e) {
-    console.warn('[sync] 推送失败', e);
+    console.warn('[sync] 推送失败', e instanceof Error ? e.message : e);
   }
 }
 
@@ -279,6 +279,18 @@ export async function initialSync(): Promise<{ sheets: Sheet[]; groups: Group[] 
   }
 
   return null;
+}
+
+/**
+ * 取消防抖并立即将当前快照推送到服务器（用于删除文稿/分组等必须尽快落库的操作）。
+ */
+export function flushPushToServer(getState: () => { sheets: Sheet[]; groups: Group[] }): void {
+  if (syncToken) {
+    clearTimeout(syncToken);
+    syncToken = null;
+  }
+  const { sheets, groups } = getState();
+  void pushToServer(sheets, groups);
 }
 
 /**
