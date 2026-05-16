@@ -51,29 +51,54 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   });
 });
 
-/** 显式软删文稿（不依赖全量同步延时） */
-router.delete('/sheets/:sheetId', async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user!.userId;
-  const sheetId = req.params.sheetId;
-  const n = await markSheetDeleted(userId, sheetId);
-  if (n === 0) {
-    res.status(404).json({ error: '未找到文稿或已删除' });
-    return;
+/** 显式软删文稿（不依赖全量同步；另提供 POST 以兼容禁用 DELETE 的代理） */
+async function handleSoftDeleteSheet(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const sheetId = req.params.sheetId;
+    const n = await markSheetDeleted(userId, sheetId);
+    if (n === 0) {
+      res.status(404).json({ error: '未找到文稿或已删除' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (e: unknown) {
+    console.error('[notes] soft-delete sheet', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: msg });
   }
-  res.json({ ok: true });
-});
+}
+
+function handleSoftDeleteSheetBind(_req: Request, res: Response, next: (err?: unknown) => void): void {
+  void handleSoftDeleteSheet(_req as Request, res).catch(next);
+}
 
 /** 显式软删分组 */
-router.delete('/groups/:groupId', async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user!.userId;
-  const groupId = req.params.groupId;
-  const n = await markGroupDeleted(userId, groupId);
-  if (n === 0) {
-    res.status(404).json({ error: '未找到分组或已删除' });
-    return;
+async function handleSoftDeleteGroup(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const groupId = req.params.groupId;
+    const n = await markGroupDeleted(userId, groupId);
+    if (n === 0) {
+      res.status(404).json({ error: '未找到分组或已删除' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (e: unknown) {
+    console.error('[notes] soft-delete group', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: msg });
   }
-  res.json({ ok: true });
-});
+}
+
+function handleSoftDeleteGroupBind(_req: Request, res: Response, next: (err?: unknown) => void): void {
+  void handleSoftDeleteGroup(_req as Request, res).catch(next);
+}
+
+router.delete('/sheets/:sheetId', handleSoftDeleteSheetBind);
+router.post('/sheets/:sheetId/delete', handleSoftDeleteSheetBind);
+router.delete('/groups/:groupId', handleSoftDeleteGroupBind);
+router.post('/groups/:groupId/delete', handleSoftDeleteGroupBind);
 
 // PUT /api/notes — 全量同步（客户端未包含的 id 做软删）
 router.put('/', async (req: Request, res: Response): Promise<void> => {

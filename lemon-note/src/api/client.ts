@@ -14,9 +14,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...(init?.headers ?? {}),
   };
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? '请求失败');
-  return body as T;
+  const text = await res.text();
+  if (res.ok) {
+    if (!text) return {} as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new ApiError(res.status, text.length > 300 ? `响应格式异常: ${text.slice(0, 300)}…` : `响应格式异常: ${text}`);
+    }
+  }
+  let errorMsg = `请求失败 (${res.status})`;
+  if (text) {
+    try {
+      const body = JSON.parse(text) as { error?: string };
+      if (body?.error) errorMsg = body.error;
+    } catch {
+      errorMsg = text.length > 300 ? `${text.slice(0, 300)}…` : text;
+    }
+  }
+  throw new ApiError(res.status, errorMsg);
 }
 
 export const api = {

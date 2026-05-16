@@ -28,13 +28,13 @@ export const notesApi = {
   syncAll: (data: NotesSnapshot) =>
     api.put<{ ok: boolean }>('/notes', data),
 
-  /** 软删除单篇文稿（服务端 deleted=1） */
+  /** 软删除单篇文稿（POST 避免部分环境屏蔽 DELETE） */
   softDeleteSheet: (sheetId: string) =>
-    api.delete<{ ok: boolean }>(`/notes/sheets/${encodeURIComponent(sheetId)}`),
+    api.post<{ ok: boolean }>(`/notes/sheets/${encodeURIComponent(sheetId)}/delete`, {}),
 
   /** 软删除分组 */
   softDeleteGroup: (groupId: string) =>
-    api.delete<{ ok: boolean }>(`/notes/groups/${encodeURIComponent(groupId)}`),
+    api.post<{ ok: boolean }>(`/notes/groups/${encodeURIComponent(groupId)}/delete`, {}),
 
   /** 保存版本快照 */
   saveVersion: (sheet: Sheet) =>
