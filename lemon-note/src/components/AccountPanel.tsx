@@ -414,6 +414,21 @@ export function AccountPanel({ onClose }: Props) {
       </div>
     </div>
 
+    {showLogoutConfirm && (
+      <ConfirmDialog
+        title="退出登录"
+        message="确定要退出当前账户吗？未同步的本地草稿仍保留在本机。"
+        confirmText="退出登录"
+        danger
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          logout();
+          onClose();
+        }}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
+    )}
+
     {showCloseAccount && (
       <div className="modal-overlay modal-overlay--glass confirm-overlay" onClick={() => !closeAccountLoading && setShowCloseAccount(false)}>
         <div className="modal-panel confirm-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
